@@ -1,0 +1,282 @@
+"""
+Service layer for business logic and smart features
+"""
+from datetime import date, timedelta
+from django.utils import timezone
+from django.db import models
+from django.db.models import Q
+from .models import Payment, Notification, TenantProfile, User, Message
+
+
+class NotificationService:
+    """Service for managing notifications"""
+    
+    @staticmethod
+    def create_overdue_notifications():
+        """Create notifications for overdue payments (cron job ready)"""
+        today = date.today()
+        
+        # Find payments that are now overdue
+        overdue_payments = Payment.objects.filter(
+            status='PENDING',
+            month_for__lte=today.replace(day=1) - timedelta(days=1)
+        ).filter(
+            Q(notifications__isnull=True) | ~Q(notifications__notification_type='OVERDUE_RENT')
+        )
+        
+        for payment in overdue_payments:
+            if payment.is_overdue:
+                Notification.create_notification(
+                    user=payment.tenant.user,
+                    title="Rent Overdue",
+                    message=f"Your rent payment for {payment.month_for.strftime('%B %Y')} is overdue by {payment.days_overdue} days.",
+                    notification_type='OVERDUE_RENT',
+                    related_payment=payment
+                )
+    
+    @staticmethod
+    def create_rent_due_reminders():
+        """Create rent due reminders (cron job ready)"""
+        today = date.today()
+        
+        # Find payments due in next 7 days
+        due_soon = today + timedelta(days=7)
+        
+        upcoming_payments = Payment.objects.filter(
+            status='PENDING',
+            month_for__month=due_soon.month,
+            month_for__year=due_soon.year
+        ).filter(
+            Q(notifications__isnull=True) | ~Q(notifications__notification_type='RENT_DUE')
+        )
+        
+        for payment in upcoming_payments:
+            Notification.create_notification(
+                user=payment.tenant.user,
+                title="Rent Due Soon",
+                message=f"Your rent payment of {payment.amount_paid} for {payment.month_for.strftime('%B %Y')} is due on {due_soon.strftime('%B %d, %Y')}.",
+                notification_type='RENT_DUE',
+                related_payment=payment
+            )
+    
+    @staticmethod
+    def mark_notifications_as_read(user, notification_ids=None):
+        """Mark notifications as read"""
+        queryset = Notification.objects.filter(user=user, is_read=False)
+        
+        if notification_ids:
+            queryset = queryset.filter(id__in=notification_ids)
+        
+        for notification in queryset:
+            notification.mark_as_read()
+        
+        return queryset.count()
+
+
+class PaymentService:
+    """Service for payment operations"""
+    
+    @staticmethod
+    def get_tenant_payment_summary(tenant_profile):
+        """Get comprehensive payment summary for tenant"""
+        payments = Payment.objects.filter(tenant=tenant_profile).order_by('-month_for')
+        
+        # Current month
+        current_month = date.today().replace(day=1)
+        current_payment = payments.filter(month_for=current_month).first()
+        
+        # Overdue payments
+        overdue_payments = payments.filter(status='OVERDUE')
+        
+        # Total paid
+        total_paid = payments.filter(status='PAID').aggregate(
+            total=models.Sum('amount_paid')
+        )['total'] or 0
+        
+        # Last 6 months payment history
+        six_months_ago = (current_month - timedelta(days=180)).replace(day=1)
+        recent_payments = payments.filter(month_for__gte=six_months_ago)
+        
+        return {
+            'current_month': {
+                'status': current_payment.status if current_payment else 'NOT_DUE',
+                'amount': current_payment.amount_paid if current_payment else 0,
+                'due_date': current_payment.payment_date if current_payment else None
+            },
+            'overdue_count': overdue_payments.count(),
+            'overdue_amount': overdue_payments.aggregate(
+                total=models.Sum('amount_paid')
+            )['total'] or 0,
+            'total_paid': total_paid,
+            'recent_payments': recent_payments
+        }
+    
+    @staticmethod
+    def get_admin_payment_stats(property_id=None, month=None, year=None):
+        """Get payment statistics for admin dashboard"""
+        queryset = Payment.objects.all()
+        
+        if property_id:
+            queryset = queryset.filter(unit__property_obj_id=property_id)
+        
+        if month and year:
+            queryset = queryset.filter(month_for__month=month, month_for__year=year)
+        
+        # Calculate statistics
+        total_income = queryset.filter(status='PAID').aggregate(
+            total=models.Sum('amount_paid')
+        )['total'] or 0
+        
+        paid_count = queryset.filter(status='PAID').count()
+        pending_count = queryset.filter(status='PENDING').count()
+        overdue_count = queryset.filter(status='OVERDUE').count()
+        
+        return {
+            'total_income': total_income,
+            'paid_count': paid_count,
+            'pending_count': pending_count,
+            'overdue_count': overdue_count,
+            'total_count': queryset.count()
+        }
+
+
+class MessageService:
+    """Service for messaging operations"""
+    
+    @staticmethod
+    def get_user_conversations(user):
+        """Get all conversations for a user"""
+        if user.role == 'ADMIN':
+            # Admin sees all conversations
+            messages = Message.objects.filter(
+                Q(sender=user) | Q(receiver=user)
+            ).select_related('sender', 'receiver').order_by('-timestamp')
+        else:
+            # Tenant only sees conversations with admins
+            messages = Message.objects.filter(
+                Q(sender=user, receiver__role='ADMIN') | 
+                Q(receiver=user, sender__role='ADMIN')
+            ).select_related('sender', 'receiver').order_by('-timestamp')
+        
+        # Group by conversation partner
+        conversations = {}
+        for message in messages:
+            partner = message.receiver if message.sender == user else message.sender
+            if partner.id not in conversations:
+                conversations[partner.id] = {
+                    'partner': partner,
+                    'last_message': message,
+                    'unread_count': 0
+                }
+            
+            if message.receiver == user and not message.is_read:
+                conversations[partner.id]['unread_count'] += 1
+        
+        return list(conversations.values())
+    
+    @staticmethod
+    def get_conversation_messages(user, partner_id):
+        """Get messages between user and partner"""
+        try:
+            partner = User.objects.get(id=partner_id)
+            
+            # Validate conversation rules
+            if user.role == 'TENANT' and partner.role != 'ADMIN':
+                return None
+            
+            messages = Message.objects.filter(
+                (Q(sender=user) & Q(receiver=partner)) |
+                (Q(sender=partner) & Q(receiver=user))
+            ).select_related('sender', 'receiver').order_by('timestamp')
+            
+            # Mark messages as read
+            messages.filter(receiver=user, is_read=False).update(
+                is_read=True, read_at=timezone.now()
+            )
+            
+            return messages
+            
+        except User.DoesNotExist:
+            return None
+    
+    @staticmethod
+    def send_message(sender, receiver_id, subject, body):
+        """Send a message with validation"""
+        try:
+            receiver = User.objects.get(id=receiver_id)
+            
+            message = Message(
+                sender=sender,
+                receiver=receiver,
+                subject=subject,
+                body=body
+            )
+            message.save()
+            
+            return message
+            
+        except User.DoesNotExist:
+            return None
+
+
+class ReportService:
+    """Service for generating reports"""
+    
+    @staticmethod
+    def generate_monthly_report(year, month):
+        """Generate monthly financial report"""
+        payments = Payment.objects.filter(month_for__year=year, month_for__month=month)
+        
+        return {
+            'period': f"{year}-{month:02d}",
+            'total_income': payments.filter(status='PAID').aggregate(
+                total=models.Sum('amount_paid')
+            )['total'] or 0,
+            'expected_income': payments.aggregate(
+                total=models.Sum('amount_paid')
+            )['total'] or 0,
+            'paid_count': payments.filter(status='PAID').count(),
+            'pending_count': payments.filter(status='PENDING').count(),
+            'overdue_count': payments.filter(status='OVERDUE').count(),
+            'collection_rate': round(
+                (payments.filter(status='PAID').count() / payments.count() * 100) 
+                if payments.count() > 0 else 0, 2
+            )
+        }
+    
+    @staticmethod
+    def generate_property_report(property_id, start_date=None, end_date=None):
+        """Generate property-specific report"""
+        from .models import Property, Unit
+        
+        try:
+            property_obj = Property.objects.get(id=property_id)
+            units = Unit.objects.filter(property_obj=property_obj)
+            
+            queryset = Payment.objects.filter(unit__in=units)
+            
+            if start_date:
+                queryset = queryset.filter(payment_date__gte=start_date)
+            if end_date:
+                queryset = queryset.filter(payment_date__lte=end_date)
+            
+            return {
+                'property': property_obj.name,
+                'total_units': units.count(),
+                'occupied_units': units.filter(is_occupied=True).count(),
+                'vacancy_rate': round(
+                    (units.filter(is_occupied=False).count() / units.count() * 100) 
+                    if units.count() > 0 else 0, 2
+                ),
+                'total_income': queryset.filter(status='PAID').aggregate(
+                    total=models.Sum('amount_paid')
+                )['total'] or 0,
+                'payment_breakdown': {
+                    'paid': queryset.filter(status='PAID').count(),
+                    'pending': queryset.filter(status='PENDING').count(),
+                    'overdue': queryset.filter(status='OVERDUE').count()
+                }
+            }
+            
+        except Property.DoesNotExist:
+            return None
