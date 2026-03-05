@@ -12,6 +12,8 @@ from .serializers import (
     UserSerializer
 )
 from .permissions import AdminOnly
+from .models import UserLoginLog
+
 
 User = get_user_model()
 
@@ -57,6 +59,19 @@ class LoginView(generics.GenericAPIView):
             raise
 
         user = serializer.validated_data['user']
+
+        # Record login log
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            ip = x_forwarded_for.split(',')[0]
+        else:
+            ip = request.META.get('REMOTE_ADDR')
+        
+        UserLoginLog.objects.create(
+            user=user,
+            ip_address=ip,
+            user_agent=request.META.get('HTTP_USER_AGENT')
+        )
 
         # Generate tokens
         refresh = RefreshToken.for_user(user)

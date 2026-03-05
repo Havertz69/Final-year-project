@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from django.utils import timezone
 from django.db import models
 from django.db.models import Q
-from .models import Payment, Notification, TenantProfile, User, Message
+from .models import Payment, Notification, TenantProfile, User, Message, Lease
 
 
 class NotificationService:
@@ -71,6 +71,41 @@ class NotificationService:
             notification.mark_as_read()
         
         return queryset.count()
+
+    @staticmethod
+    def create_lease_expiry_reminders():
+        """
+        Notify tenants when their lease is expiring within 30 days.
+        Designed to be triggered by a cron job.
+        """
+        today = date.today()
+        warning_date = today + timedelta(days=30)
+
+        expiring_leases = Lease.objects.filter(
+            end_date__lte=warning_date,
+            end_date__gte=today,
+        ).select_related('tenant__user')
+
+        for lease in expiring_leases:
+            days_left = (lease.end_date - today).days
+            # Avoid duplicate notifications — check if one was already sent today
+            already_notified = Notification.objects.filter(
+                user=lease.tenant.user,
+                notification_type='SYSTEM_ANNOUNCEMENT',
+                created_at__date=today,
+                title__startswith='Lease Expiring'
+            ).exists()
+            if not already_notified:
+                Notification.create_notification(
+                    user=lease.tenant.user,
+                    title=f"Lease Expiring in {days_left} Days",
+                    message=(
+                        f"Your lease for unit {lease.unit.unit_number} expires on "
+                        f"{lease.end_date.strftime('%B %d, %Y')}. "
+                        f"Please contact your property manager to discuss renewal."
+                    ),
+                    notification_type='SYSTEM_ANNOUNCEMENT',
+                )
 
 
 class PaymentService:
@@ -280,3 +315,69 @@ class ReportService:
             
         except Property.DoesNotExist:
             return None
+
+    @staticmethod
+    def get_revenue_trends(months=12):
+        """Return monthly revenue for the last N months (newest last)."""
+        from dateutil.relativedelta import relativedelta
+        today = date.today()
+        trends = []
+        for i in range(months - 1, -1, -1):
+            period_date = (today.replace(day=1) - relativedelta(months=i))
+            qs = Payment.objects.filter(
+                month_for__year=period_date.year,
+                month_for__month=period_date.month,
+            )
+            total = qs.filter(status='PAID').aggregate(
+                total=models.Sum('amount_paid')
+            )['total'] or 0
+            trends.append({
+                'period': period_date.strftime('%b %Y'),
+                'total_income': float(total),
+                'paid_count': qs.filter(status='PAID').count(),
+                'pending_count': qs.filter(status='PENDING').count(),
+                'overdue_count': qs.filter(status='OVERDUE').count(),
+            })
+        return trends
+
+    @staticmethod
+    def export_payments_to_csv(year=None, month=None):
+        """Generate a CSV HttpResponse for payment records."""
+        import csv
+        from django.http import HttpResponse
+
+        qs = Payment.objects.select_related(
+            'tenant__user', 'unit__property_obj'
+        ).order_by('-payment_date')
+
+        if year:
+            qs = qs.filter(month_for__year=year)
+        if month:
+            qs = qs.filter(month_for__month=month)
+
+        filename = f"payments_{year or 'all'}_{month or 'all'}.csv"
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        writer = csv.writer(response)
+        writer.writerow([
+            'ID', 'Tenant Name', 'Tenant Email',
+            'Unit', 'Property', 'Amount (KES)',
+            'Month For', 'Payment Date', 'Method', 'Status',
+            'Transaction Ref',
+        ])
+        for p in qs:
+            writer.writerow([
+                p.id,
+                p.tenant.user.full_name,
+                p.tenant.user.email,
+                p.unit.unit_number,
+                p.unit.property_obj.name,
+                p.amount_paid,
+                p.month_for.strftime('%B %Y'),
+                p.payment_date,
+                p.get_payment_method_display(),
+                p.status,
+                p.transaction_reference or '',
+            ])
+        return response
