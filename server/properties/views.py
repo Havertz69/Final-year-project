@@ -7,6 +7,7 @@ from django.db.models import Sum, Count, Q, F
 from django.utils import timezone
 from datetime import date, timedelta
 from accounts.permissions import AdminOnly, TenantOnly
+from django.core.exceptions import ValidationError
 from .models import Property, Unit, TenantProfile, Payment, Message, Notification, MaintenanceRequest, PaymentEvidence, LeaseDocument, Lease
 from .serializers import (
     PropertySerializer, PropertyDetailSerializer,
@@ -1271,6 +1272,118 @@ def tenant_pay_payment(request):
         return Response({'message': 'Payment initiated', 'status': payment.status})
     except TenantProfile.DoesNotExist:
         return Response({'error': 'Profile not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['POST'])
+@permission_classes([TenantOnly])
+def tenant_submit_payment(request):
+    """
+    Submit a manual payment (with optional evidence)
+    """
+    print(">>> tenant_submit_payment hit")
+    try:
+        profile = TenantProfile.objects.get(user=request.user)
+        print(">>> Profile fetched:", profile)
+        
+        amount_paid = request.data.get('amount_paid')
+        month_for = request.data.get('month_for')
+        payment_method = request.data.get('payment_method', 'BANK_TRANSFER')
+        transaction_reference = request.data.get('transaction_reference', '')
+        evidence_file = request.FILES.get('evidence')
+
+        print(f">>> Payload data: amount_paid={amount_paid}, month_for={month_for}, method={payment_method}, ref={transaction_reference}")
+
+        if not amount_paid or not month_for:
+            print(">>> Missing amount or month")
+            return Response({'error': 'Amount and Month are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Parse month_for date
+        try:
+            month_date = timezone.datetime.strptime(month_for, '%Y-%m-%d').date()
+            # Normalize to first of the month
+            month_date = month_date.replace(day=1)
+            print(">>> Parsed month_date:", month_date)
+        except ValueError:
+            print(">>> ValueError parsing date")
+            return Response({'error': 'Invalid date format. Use YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if payment for this month already exists
+        existing_payment = Payment.objects.filter(
+            tenant=profile,
+            month_for=month_date
+        ).first()
+
+        if existing_payment:
+            print(">>> Existing payment found:", existing_payment.id)
+            if existing_payment.status == 'PAID':
+                print(">>> Existent is PAID. Halting.")
+                return Response({'error': f'Payment for {month_date.strftime("%B %Y")} has already been confirmed.'}, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                # Update existing pending/overdue payment
+                print(">>> Updating existing payment")
+                payment = existing_payment
+                payment.amount_paid = amount_paid
+                payment.payment_method = payment_method
+                payment.transaction_reference = transaction_reference
+                payment.payment_date = timezone.now().date()
+                payment.status = 'PENDING'
+                payment.save()
+        else:
+            print(">>> No existing payment. Creating one.")
+            if not profile.assigned_unit:
+                print(">>> Profile has no assigned unit")
+                return Response({'error': 'No unit assigned to your profile.'}, status=status.HTTP_400_BAD_REQUEST)
+                
+            payment = Payment.objects.create(
+                tenant=profile,
+                unit=profile.assigned_unit,
+                amount_paid=amount_paid,
+                month_for=month_date,
+                payment_date=timezone.now().date(),
+                payment_method=payment_method,
+                transaction_reference=transaction_reference,
+                status='PENDING'
+            )
+            print(">>> Payment created:", payment.id)
+
+        # Attach evidence if provided
+        if evidence_file:
+            print(">>> Attaching evidence")
+            PaymentEvidence.objects.create(
+                payment=payment,
+                uploaded_by=request.user,
+                file=evidence_file,
+                status='PENDING'
+            )
+            print(">>> Evidence attached")
+
+        return Response({
+            'message': 'Payment submitted successfully',
+            'payment': TenantPaymentSerializer(payment).data
+        }, status=status.HTTP_201_CREATED)
+
+    except TenantProfile.DoesNotExist:
+        print(">>> Tenant profile not found!")
+        return Response({'error': 'Tenant profile not found'}, status=status.HTTP_404_NOT_FOUND)
+    except ValidationError as e:
+        # Django model ValidationError
+        error_messages = []
+        if hasattr(e, 'message_dict'):
+            for field, messages in e.message_dict.items():
+                error_messages.extend(messages)
+        elif hasattr(e, 'messages'):
+            error_messages = e.messages
+        else:
+            error_messages = [str(e)]
+        
+        err_msg = " ".join(error_messages)
+        print(">>> Validation Error:", err_msg)
+        return Response({'error': err_msg}, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        import traceback
+        print(">>> EXCEPTION IN tenant_submit_payment:")
+        traceback.print_exc()
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 class TenantLeaseView(generics.RetrieveAPIView):
     permission_classes = [TenantOnly]

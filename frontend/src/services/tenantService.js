@@ -5,7 +5,7 @@ const tenantService = {
   getProfile: () => api.get('/my-unit/'),
   getFullProfile: () => api.get('/tenant/profile/'),
   getPayments: () => api.get('/my-payments/'),
-  submitPayment: (formData) => api.post('/payments/', formData, {
+  submitPayment: (formData) => api.post('/my-payments/submit/', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   }),
   getMaintenance: () => api.get('/my-maintenance/'),

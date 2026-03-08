@@ -97,6 +97,10 @@ urlpatterns = [
     path('tenant/payments/<int:pk>/', views.TenantPaymentDetailView.as_view(), name='tenant-payment-detail-v2'),
     path('tenant/payments/<int:pk>/receipt/', views.download_payment_receipt, name='tenant-payment-receipt-v2'),
     path('tenant/payments/pay/', views.tenant_pay_payment, name='tenant-pay-payment'),
+    path('tenant/payments/submit/', views.tenant_submit_payment, name='tenant-submit-payment'),
+    
+    # Legacy Tenant Payments
+    path('my-payments/submit/', views.tenant_submit_payment, name='tenant-submit-payment-legacy'),
 
     # Lease V2
     path('tenant/lease/', views.TenantLeaseView.as_view(), name='tenant-lease-v2'),

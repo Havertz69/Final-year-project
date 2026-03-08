@@ -49,7 +49,7 @@ export default function LoginPage() {
       const r = await login(email, password);
       navigate(r === 'admin' ? '/admin/dashboard' : '/tenant/dashboard', { replace: true });
     } catch (err) {
-      setApiError(err.response?.data?.message || 'Login failed. Please check your credentials.');
+      setApiError(err.errorMessage || 'Login failed. Please check your credentials.');
     } finally {
       setLoading(false);
     }

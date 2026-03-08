@@ -87,11 +87,11 @@ WSGI_APPLICATION = 'ploti_backend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('DB_NAME', 'ploti_db'),
-        'USER': os.getenv('DB_USER', 'postgres'),
-        'PASSWORD': os.getenv('DB_PASSWORD', ''),
-        'HOST': os.getenv('DB_HOST', 'localhost'),
-        'PORT': os.getenv('DB_PORT', '5432'),
+        'NAME': 'property_pulse',      #database name
+        'USER': 'postgres',            # PostgreSQL username
+        'PASSWORD': 1234,         # PostgreSQL password
+        'HOST': 'localhost',
+        'PORT': '5432',
     }
 }
 

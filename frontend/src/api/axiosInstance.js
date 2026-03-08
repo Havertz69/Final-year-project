@@ -19,8 +19,25 @@ axiosInstance.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error.response ? error.response.status : null;
-    const message = error.response?.data?.message || error.message;
+    const data = error.response?.data;
+    let message = error.message;
+
+    if (data) {
+      if (typeof data === 'string') message = data;
+      else if (data.message) message = data.message;
+      else if (data.detail) message = data.detail;
+      else if (data.non_field_errors) message = data.non_field_errors[0];
+      else if (data.error) message = data.error;
+      else if (typeof data === 'object') {
+        const firstKey = Object.keys(data)[0];
+        const val = data[firstKey];
+        message = Array.isArray(val) ? val[0] : val;
+      }
+    }
+
     console.error(`[API Error] ${status || 'Network'}: ${message}`);
+    // Inject the cleaned message back into the error object for downstream use
+    error.errorMessage = message;
 
     if (status === 401) {
       localStorage.removeItem('token');

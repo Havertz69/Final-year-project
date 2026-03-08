@@ -38,6 +38,9 @@ export default function MaintenancePage() {
       if (Array.isArray(payload)) {
         setRequests(payload);
         setHealth(null);
+      } else if (payload && Array.isArray(payload.results)) {
+        setRequests(payload.results);
+        setHealth(null);
       } else {
         setHealth(payload);
         setRequests([]);
