@@ -33,10 +33,11 @@ urlpatterns = [
     path('my-property/', views.tenant_property_details, name='tenant-property'),
     
     # Payment URLs
-    path('payments/', views.PaymentListCreateView.as_view(), name='payment-list-create'),
+    path('payments/', views.PaymentListCreateView.as_view(), name='payment-list'),
     path('payments/<int:pk>/', views.PaymentDetailView.as_view(), name='payment-detail'),
     path('payments/<int:payment_id>/confirm/', views.confirm_payment, name='confirm-payment'),
-    path('payments/statistics/', views.payment_statistics, name='payment-statistics'),
+    path('payments/<int:payment_id>/decline/', views.decline_payment, name='decline-payment'),
+    path('payments/statistics/', views.payment_statistics, name='payment-stats'),
     
     # Tenant payment URLs
     path('my-payments/', views.tenant_payment_history, name='tenant-payments'),
@@ -47,6 +48,7 @@ urlpatterns = [
     path('smart/trigger-rent-reminders/', views.trigger_rent_due_reminders, name='trigger-rent-reminders'),
     path('smart/monthly-report/', views.generate_monthly_report, name='monthly-report'),
     path('smart/property-report/<int:property_id>/', views.generate_property_report, name='property-report'),
+    path('smart/reports/export-pdf/', views.export_report_pdf, name='export-report-pdf'),
     path('smart/dashboard/', views.dashboard_summary, name='dashboard-summary'),
     path('smart/health-check/', views.system_health_check, name='health-check'),
     

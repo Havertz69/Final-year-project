@@ -3,32 +3,35 @@ import {
   Box, Typography, Card, CardContent, Grid, Button,
   Divider, Chip, Alert,
 } from '@mui/material';
-import DownloadIcon from '@mui/icons-material/Download';
-import DescriptionIcon from '@mui/icons-material/Description';
-import EventIcon from '@mui/icons-material/Event';
-import ApartmentIcon from '@mui/icons-material/Apartment';
-import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
+import {
+  Download as DownloadIcon,
+  Description as DescriptionIcon,
+  Event as EventIcon,
+  Apartment as ApartmentIcon,
+  AttachMoney as AttachMoneyIcon
+} from '@mui/icons-material';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import ErrorState from '../../components/common/ErrorState';
 import tenantService from '../../services/tenantService';
 import TenantPageShell from '../../components/tenant/TenantPageShell';
+import { getApiErrorMessage } from '../../utils/apiUtils';
 
 function InfoRow({ label, value }) {
   return (
-    <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.75, borderBottom: '1px solid #F1F5F9' }}>
+    <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 1.25, borderBottom: '1px solid #F1F5F9' }}>
       <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>{label}</Typography>
-      <Typography variant="body2" sx={{ fontWeight: 600 }}>{value || '—'}</Typography>
+      <Typography variant="body2" sx={{ fontWeight: 700, color: '#1e293b' }}>{value || '—'}</Typography>
     </Box>
   );
 }
 
 function LeaseCard({ icon, title, children }) {
   return (
-    <Card elevation={0} sx={{ borderRadius: 3, border: '1px solid #E2E8F0', height: '100%' }}>
+    <Card elevation={0} sx={{ borderRadius: 4, border: '1px solid #E2E8F0', height: '100%', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
       <CardContent sx={{ p: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-          <Box sx={{ mr: 1.5, display: 'flex' }}>{icon}</Box>
-          <Typography variant="h6" fontWeight={700} color="#1E293B">{title}</Typography>
+          <Box sx={{ mr: 1.5, p: 1, bgcolor: '#f8fafc', borderRadius: 2, display: 'flex' }}>{icon}</Box>
+          <Typography variant="subtitle1" fontWeight={800} color="#1E293B">{title}</Typography>
         </Box>
         <Divider sx={{ mb: 2 }} />
         {children}
@@ -48,7 +51,7 @@ export default function TenantLeasePage() {
       const res = await tenantService.getFullProfile();
       setProfile(res.data);
     } catch (e) {
-      setError(e.response?.data?.error || 'Failed to load lease information');
+      setError(getApiErrorMessage(e, 'Failed to load lease information'));
     } finally {
       setLoading(false);
     }

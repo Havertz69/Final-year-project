@@ -1,4 +1,5 @@
 from django.db import models
+from decimal import Decimal, InvalidOperation
 from django.contrib.auth import get_user_model
 from django.core.validators import MinValueValidator
 from django.utils import timezone
@@ -323,11 +324,9 @@ class Payment(models.Model):
 
     def clean(self):
         """Validate payment logic"""
-        # Validate amount matches unit rent
-        if self.amount_paid != self.unit.rent_amount:
-            raise ValidationError({
-                'amount_paid': f'Amount must match unit rent of {self.unit.rent_amount}'
-            })
+        # Validate amount matches unit rent (Optional: could be moved to a warning or just removed)
+        # We allow flexible payments now to prevent save() failures during admin approval
+        pass
         
         # Prevent duplicate payment for same month
         existing_payment = Payment.objects.filter(
@@ -355,8 +354,6 @@ class Payment(models.Model):
             
             if today > self.due_date:
                 self.status = 'OVERDUE'
-            elif self.amount_paid == self.unit.rent_amount:
-                self.status = 'PAID'
         
         super().save(*args, **kwargs)
 

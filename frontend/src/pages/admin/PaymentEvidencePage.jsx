@@ -43,12 +43,12 @@ export default function PaymentEvidencePage() {
     if (!selectedEvidence) return;
     setUpdating(true);
     try {
-      await adminService.updatePaymentEvidence(selectedEvidence.id, { status: 'APPROVED', admin_notes });
+      await adminService.updatePaymentEvidence(selectedEvidence.id, { status: 'APPROVED', admin_notes: adminNotes });
       setSnack({ open: true, message: 'Evidence approved', severity: 'success' });
       setDialogOpen(false); setSelectedEvidence(null); setAdminNotes('');
       fetchEvidence();
     } catch (e) {
-      setSnack({ open: true, message: e.response?.data?.message || 'Failed to approve', severity: 'error' });
+      setSnack({ open: true, message: getApiErrorMessage(e, 'Failed to approve'), severity: 'error' });
     } finally { setUpdating(false); }
   };
 
@@ -56,12 +56,12 @@ export default function PaymentEvidencePage() {
     if (!selectedEvidence) return;
     setUpdating(true);
     try {
-      await adminService.updatePaymentEvidence(selectedEvidence.id, { status: 'REJECTED', admin_notes });
+      await adminService.updatePaymentEvidence(selectedEvidence.id, { status: 'REJECTED', admin_notes: adminNotes });
       setSnack({ open: true, message: 'Evidence rejected', severity: 'success' });
       setDialogOpen(false); setSelectedEvidence(null); setAdminNotes('');
       fetchEvidence();
     } catch (e) {
-      setSnack({ open: true, message: e.response?.data?.message || 'Failed to reject', severity: 'error' });
+      setSnack({ open: true, message: getApiErrorMessage(e, 'Failed to reject'), severity: 'error' });
     } finally { setUpdating(false); }
   };
 

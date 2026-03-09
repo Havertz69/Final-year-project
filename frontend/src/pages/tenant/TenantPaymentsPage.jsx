@@ -1,18 +1,25 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box, Typography, Table, TableBody, TableCell, TableContainer, TableHead,
   TableRow, Paper, Chip, Button, Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, Snackbar, Alert, IconButton, Tooltip, MenuItem, Grid
+  TextField, Snackbar, Alert, IconButton, Tooltip, MenuItem, Grid, InputAdornment,
+  Stepper, Step, StepLabel, Divider, FormControl, InputLabel, Select, CircularProgress
 } from '@mui/material';
-import UploadFileIcon from '@mui/icons-material/UploadFile';
-import CloseIcon from '@mui/icons-material/Close';
-import DownloadIcon from '@mui/icons-material/Download';
-import PaymentIcon from '@mui/icons-material/Payment';
+import {
+  UploadFile as UploadFileIcon,
+  Close as CloseIcon,
+  Download as DownloadIcon,
+  Payment as PaymentIcon,
+  Search as SearchIcon,
+  FilterList as FilterListIcon,
+  CheckCircle as CheckCircleIcon
+} from '@mui/icons-material';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import EmptyState from '../../components/common/EmptyState';
 import ErrorState from '../../components/common/ErrorState';
 import tenantService from '../../services/tenantService';
 import TenantPageShell from '../../components/tenant/TenantPageShell';
+import { getApiErrorMessage, parseListResponse } from '../../utils/apiUtils';
 
 export default function TenantPaymentsPage() {
   const [payments, setPayments] = useState([]);
@@ -20,15 +27,19 @@ export default function TenantPaymentsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   
+  // Filtering
+  const [filters, setFilters] = useState({ search: '', status: '' });
+  
   // Dialog states
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState('UPLOAD'); // 'UPLOAD' or 'PAY'
+  const [activeStep, setActiveStep] = useState(0); 
   const [selectedPayment, setSelectedPayment] = useState(null);
   
   // Form states
   const [amountPaid, setAmountPaid] = useState('');
   const [monthFor, setMonthFor] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('BANK_TRANSFER');
+  const [paymentMethod, setPaymentMethod] = useState('MOBILE_MONEY');
   const [transactionRef, setTransactionRef] = useState('');
   const [evidenceFile, setEvidenceFile] = useState(null);
   
@@ -41,12 +52,22 @@ export default function TenantPaymentsPage() {
       const res = await tenantService.getPayments();
       setPayments(res.data?.payments || []);
       setSummary(res.data?.summary || null);
-    }
-    catch (e) { setError(e.response?.data?.message || 'Failed to load'); }
-    finally { setLoading(false); }
+    } catch (e) { 
+      setError(getApiErrorMessage(e, 'Failed to load payment history')); 
+    } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { fetchPayments(); }, [fetchPayments]);
+
+  const filteredPayments = useMemo(() => {
+    return payments.filter(p => {
+      const matchesSearch = !filters.search || 
+        (p.transaction_reference && p.transaction_reference.toLowerCase().includes(filters.search.toLowerCase())) ||
+        (p.month_for_formatted && p.month_for_formatted.toLowerCase().includes(filters.search.toLowerCase()));
+      const matchesStatus = !filters.status || p.status === filters.status;
+      return matchesSearch && matchesStatus;
+    });
+  }, [payments, filters]);
 
   const handleOpenUpload = (payment) => {
     setSelectedPayment(payment);
@@ -58,28 +79,19 @@ export default function TenantPaymentsPage() {
   const handleOpenPay = async () => {
     setSelectedPayment(null);
     setDialogMode('PAY');
+    setActiveStep(0);
     
-    // Fetch profile to get rent amount
     try {
       setUploading(true);
       const profileRes = await tenantService.getFullProfile();
       const unit = profileRes.data?.unit_info;
-      
-      if (!unit) {
-        setSnack({ open: true, message: 'No unit assigned to your profile. Please contact admin.', severity: 'error' });
-        return;
-      }
-      
-      const rent = unit.rent_amount || '';
-      setAmountPaid(rent);
+      if (unit) setAmountPaid(unit.rent_amount || '');
     } catch (e) {
       console.error(e);
-      setAmountPaid('');
     } finally {
       setUploading(false);
     }
 
-    // Set default month to current month YYYY-MM
     const now = new Date();
     setMonthFor(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`);
     setPaymentMethod('BANK_TRANSFER');
@@ -87,6 +99,9 @@ export default function TenantPaymentsPage() {
     setEvidenceFile(null);
     setDialogOpen(true);
   };
+
+  const nextStep = () => setActiveStep(prev => prev + 1);
+  const prevStep = () => setActiveStep(prev => prev - 1);
 
   const handleUploadEvidenceOnly = async () => {
     if (!evidenceFile || !selectedPayment) return;
@@ -96,11 +111,11 @@ export default function TenantPaymentsPage() {
       formData.append('payment', selectedPayment.id);
       formData.append('file', evidenceFile);
       await tenantService.uploadPaymentEvidence(formData);
-      setSnack({ open: true, message: 'Evidence uploaded successfully', severity: 'success' });
+      setSnack({ open: true, message: 'Evidence uploaded successfully!', severity: 'success' });
       setDialogOpen(false); 
       fetchPayments();
     } catch (e) {
-      setSnack({ open: true, message: e.response?.data?.message || e.response?.data?.error || 'Upload failed', severity: 'error' });
+      setSnack({ open: true, message: getApiErrorMessage(e, 'Upload failed'), severity: 'error' });
     } finally { setUploading(false); }
   };
 
@@ -109,40 +124,36 @@ export default function TenantPaymentsPage() {
     setUploading(true);
     try {
       const formData = new FormData();
-      formData.append('amount_paid', amountPaid);
+      // Ensure amount is sent as a string with 2 decimal places to match backend expectation
+      const formattedAmount = parseFloat(amountPaid).toFixed(2);
+      formData.append('amount_paid', formattedAmount);
       formData.append('month_for', monthFor);
       formData.append('payment_method', paymentMethod);
       formData.append('transaction_reference', transactionRef);
-      if (evidenceFile) {
-        formData.append('evidence', evidenceFile);
-      }
+      if (evidenceFile) formData.append('evidence', evidenceFile);
       
       await tenantService.submitPayment(formData);
-      setSnack({ open: true, message: 'Payment submitted successfully', severity: 'success' });
+      setSnack({ open: true, message: 'Payment submitted for verification!', severity: 'success' });
       setDialogOpen(false);
       fetchPayments();
     } catch (e) {
-      setSnack({ open: true, message: e.response?.data?.message || e.response?.data?.error || 'Submission failed', severity: 'error' });
+      setSnack({ open: true, message: getApiErrorMessage(e, 'Submission failed'), severity: 'error' });
     } finally { setUploading(false); }
   };
 
   const handleDownloadReceipt = async (payment) => {
     try {
       const response = await tenantService.downloadPaymentReceipt(payment.id);
-      // Create a URL for the blob
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      // Generate filename parsing out the month from 'month_for_formatted'
       const monthStr = payment.month_for_formatted ? payment.month_for_formatted.replace(' ', '_') : 'Receipt';
       link.setAttribute('download', `Receipt_${monthStr}.pdf`);
       document.body.appendChild(link);
       link.click();
       link.parentNode.removeChild(link);
-      setSnack({ open: true, message: 'Receipt downloaded', severity: 'success' });
     } catch (error) {
-      console.error("Receipt Download Error:", error);
-      setSnack({ open: true, message: 'Error downloading receipt. Ensure it is PAID.', severity: 'error' });
+      setSnack({ open: true, message: 'Receipt download failed. Only PAID payments have receipts.', severity: 'error' });
     }
   };
 
@@ -175,99 +186,92 @@ export default function TenantPaymentsPage() {
         </Box>
       }
     >
-      {payments.length === 0 ? (
-        <Paper elevation={0} sx={{ p: 2 }}>
-          <EmptyState message="No payment history" />
-        </Paper>
+      <Box sx={{ mb: 3, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+        <TextField
+          size="small"
+          placeholder="Search by reference or month..."
+          value={filters.search}
+          onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+          sx={{ minWidth: { xs: '100%', sm: 320 } }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon fontSize="small" color="action" />
+              </InputAdornment>
+            ),
+          }}
+        />
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+          <InputLabel>Status</InputLabel>
+          <Select
+            value={filters.status}
+            label="Status"
+            onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+          >
+            <MenuItem value="">All Statuses</MenuItem>
+            <MenuItem value="PAID">Paid</MenuItem>
+            <MenuItem value="PENDING">Pending</MenuItem>
+            <MenuItem value="OVERDUE">Overdue</MenuItem>
+          </Select>
+        </FormControl>
+      </Box>
+
+      {filteredPayments.length === 0 ? (
+        <EmptyState message={payments.length === 0 ? "You have no payment records." : "No matching payments found."} />
       ) : (
-        <TableContainer component={Paper} elevation={0}>
+        <TableContainer component={Paper} elevation={0} sx={{ borderRadius: 4, border: '1px solid #e2e8f0' }}>
           <Table>
-            <TableHead>
+            <TableHead sx={{ bgcolor: '#f8fafc' }}>
               <TableRow>
-                <TableCell sx={{ fontWeight: 600 }}>Amount (KES)</TableCell>
-                <TableCell sx={{ fontWeight: 600 }}>Month</TableCell>
-                <TableCell sx={{ fontWeight: 600 }}>Due Date</TableCell>
-                <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
-                <TableCell sx={{ fontWeight: 600 }}>Method</TableCell>
-                <TableCell sx={{ fontWeight: 600 }} align="center">Actions</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Amount (KES)</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Month</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Due Status</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Payment Method</TableCell>
+                <TableCell sx={{ fontWeight: 700 }} align="center">Proof</TableCell>
+                <TableCell sx={{ fontWeight: 700 }} align="center">Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {payments.map((p) => (
+              {filteredPayments.map((p) => (
                 <TableRow key={p.id} hover>
-                  <TableCell>{Number(p.amount_paid).toLocaleString()}</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>{Number(p.amount_paid).toLocaleString()}</TableCell>
                   <TableCell>{p.month_for_formatted || p.month_for}</TableCell>
-                  <TableCell>{p.due_date || '—'}</TableCell>
                   <TableCell>
                     <Chip
                       label={p.status}
                       size="small"
                       color={p.status === 'PAID' ? 'success' : p.status === 'PENDING' ? 'warning' : p.status === 'OVERDUE' ? 'error' : 'default'}
-                      sx={{ fontWeight: 600, borderRadius: '6px' }}
+                      sx={{ fontWeight: 800, borderRadius: 1.5, fontSize: '0.7rem' }}
                     />
                   </TableCell>
                   <TableCell>{p.payment_method || '—'}</TableCell>
                   <TableCell align="center">
-                    <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', alignItems: 'center' }}>
+                    {p.evidence && p.evidence.length > 0 ? (
+                      <Tooltip title="View Proof">
+                         <IconButton size="small" onClick={() => window.open(p.evidence[p.evidence.length-1].file_url, '_blank')}>
+                           <CheckCircleIcon color="success" fontSize="small" />
+                         </IconButton>
+                      </Tooltip>
+                    ) : '—'}
+                  </TableCell>
+                  <TableCell align="center">
+                    <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center' }}>
                       {p.status === 'PAID' && (
                         <Tooltip title="Download Receipt">
-                          <IconButton
-                            size="small"
-                            onClick={() => handleDownloadReceipt(p)}
-                            sx={{ color: '#16A34A', bgcolor: '#F0FDF4', '&:hover': { bgcolor: '#DCFCE7' } }}
-                          >
+                          <IconButton size="small" onClick={() => handleDownloadReceipt(p)} sx={{ bgcolor: '#f0fdf4', color: '#16a34a' }}>
                             <DownloadIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
                       )}
-
-                      {/* Evidence Status / Upload */}
-                      {p.evidence && p.evidence.length > 0 ? (
-                        (() => {
-                          const latestEv = p.evidence[p.evidence.length - 1];
-                          const evStatus = latestEv.status;
-                          return (
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <Tooltip title={`Evidence Status: ${evStatus}${latestEv.admin_notes ? ' - ' + latestEv.admin_notes : ''}`}>
-                                <Chip
-                                  label={`Proof: ${evStatus}`}
-                                  size="small"
-                                  variant="outlined"
-                                  color={evStatus === 'APPROVED' ? 'success' : evStatus === 'PENDING' ? 'warning' : 'error'}
-                                  onClick={() => window.open(latestEv.file_url, '_blank')}
-                                  sx={{ cursor: 'pointer', height: 24, fontSize: '0.7rem', fontWeight: 600 }}
-                                />
-                              </Tooltip>
-                              {(evStatus === 'REJECTED' || (evStatus === 'PENDING' && p.status !== 'PAID')) && (
-                                <Tooltip title="Re-upload evidence">
-                                  <IconButton
-                                    size="small"
-                                    onClick={() => handleOpenUpload(p)}
-                                    sx={{ color: '#2563EB', bgcolor: '#EEF4FF', '&:hover': { bgcolor: '#DBEAFE' } }}
-                                  >
-                                    <UploadFileIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                              )}
-                            </Box>
-                          );
-                        })()
-                      ) : (
-                        p.status !== 'PAID' && (
-                          <Tooltip title="Upload evidence">
-                            <IconButton
-                              size="small"
-                              onClick={() => handleOpenUpload(p)}
-                              sx={{ color: '#2563EB', bgcolor: '#EEF4FF', '&:hover': { bgcolor: '#DBEAFE' } }}
-                            >
-                              <UploadFileIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        )
+                      {p.status !== 'PAID' && (
+                        <Tooltip title="Upload Proof">
+                          <IconButton size="small" onClick={() => handleOpenUpload(p)} sx={{ bgcolor: '#eff6ff', color: '#2563eb' }}>
+                            <UploadFileIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
                       )}
                     </Box>
                   </TableCell>
-
                 </TableRow>
               ))}
             </TableBody>
@@ -275,95 +279,145 @@ export default function TenantPaymentsPage() {
         </TableContainer>
       )}
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          {dialogMode === 'PAY' ? 'Submit Manual Payment' : 'Upload Payment Evidence'}
-          <IconButton
-            aria-label="close"
-            onClick={() => setDialogOpen(false)}
-            sx={{ position: 'absolute', right: 8, top: 8 }}
-          >
-            <CloseIcon />
-          </IconButton>
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth scroll="paper">
+        <DialogTitle sx={{ px: 3, py: 2.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Typography variant="h6" fontWeight={800}>
+              {dialogMode === 'PAY' ? 'Submit New Payment' : 'Upload Proof of Payment'}
+            </Typography>
+            <IconButton onClick={() => setDialogOpen(false)} size="small"><CloseIcon /></IconButton>
+          </Box>
         </DialogTitle>
-        <DialogContent dividers>
-          {dialogMode === 'PAY' ? (
-            <Grid container spacing={2}>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Amount Paid (KES)"
-                  type="number"
-                  required
-                  value={amountPaid}
-                  onChange={(e) => setAmountPaid(e.target.value)}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Rent Month"
-                  type="date"
-                  required
-                  InputLabelProps={{ shrink: true }}
-                  value={monthFor}
-                  onChange={(e) => setMonthFor(e.target.value)}
-                  helperText="Select any date in the target month"
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  select
-                  label="Payment Method"
-                  value={paymentMethod}
-                  onChange={(e) => setPaymentMethod(e.target.value)}
-                >
-                  <MenuItem value="MPESA">M-Pesa</MenuItem>
-                  <MenuItem value="BANK_TRANSFER">Bank Transfer</MenuItem>
-                  <MenuItem value="CASH">Cash</MenuItem>
-                  <MenuItem value="CARD">Credit/Debit Card</MenuItem>
-                </TextField>
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Transaction Reference"
-                  value={transactionRef}
-                  onChange={(e) => setTransactionRef(e.target.value)}
-                  placeholder="e.g. QKX1234567"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <Typography variant="subtitle2" sx={{ mb: 1 }}>Attach Payment Proof (Optional)</Typography>
-                <TextField
-                  type="file"
-                  fullWidth
-                  inputProps={{ accept: 'image/*,.pdf' }}
-                  onChange={(e) => setEvidenceFile(e.target.files[0])}
-                />
-              </Grid>
-            </Grid>
-          ) : (
-            <TextField
-              type="file"
-              fullWidth
-              label="Screenshot / Document"
-              inputProps={{ accept: 'image/*,.pdf' }}
-              onChange={(e) => setEvidenceFile(e.target.files[0])}
-              sx={{ mt: 1 }}
-            />
+        <DialogContent sx={{ p: 0 }}>
+          {dialogMode === 'PAY' && (
+            <Stepper activeStep={activeStep} sx={{ px: 3, py: 3, bgcolor: '#f8fafc' }}>
+              <Step><StepLabel>Details</StepLabel></Step>
+              <Step><StepLabel>Proof</StepLabel></Step>
+              <Step><StepLabel>Confirm</StepLabel></Step>
+            </Stepper>
           )}
+          
+          <Box sx={{ p: 3 }}>
+            {dialogMode === 'PAY' ? (
+              <>
+                {activeStep === 0 && (
+                  <Grid container spacing={2.5}>
+                    <Grid item xs={12}>
+                      <Alert severity="info" sx={{ mb: 1 }}>Enter the details of your payment below.</Alert>
+                      {summary?.rent_amount && Number(amountPaid) !== Number(summary.rent_amount) && (
+                        <Alert severity="warning" sx={{ mb: 2 }}>
+                          Note: Your monthly rent is <strong>KES {Number(summary.rent_amount).toLocaleString()}</strong>. Submitting a different amount may cause verification issues.
+                        </Alert>
+                      )}
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField 
+                        fullWidth 
+                        label="Amount Paid (KES)" 
+                        type="number" 
+                        value={amountPaid} 
+                        onChange={(e) => setAmountPaid(e.target.value)}
+                        helperText={summary?.rent_amount ? `Expected monthly rent: KES ${Number(summary.rent_amount).toLocaleString()}` : ''}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField fullWidth label="Target Month" type="date" InputLabelProps={{ shrink: true }} value={monthFor} onChange={(e) => setMonthFor(e.target.value)} />
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField fullWidth select label="Payment Method" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+                        <MenuItem value="MOBILE_MONEY">M-Pesa / Mobile Money</MenuItem>
+                        <MenuItem value="BANK_TRANSFER">Bank Transfer</MenuItem>
+                        <MenuItem value="CASH">Cash</MenuItem>
+                      </TextField>
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField fullWidth label="Transaction Ref" value={transactionRef} onChange={(e) => setTransactionRef(e.target.value)} placeholder="e.g. QKX1234567" />
+                    </Grid>
+                  </Grid>
+                )}
+
+                {activeStep === 1 && (
+                  <Box sx={{ textAlign: 'center', py: 2 }}>
+                    <Typography variant="subtitle1" fontWeight={700} gutterBottom>Attach Payment Receipt</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                      Adding a photo of your receipt helps us verify your payment faster.
+                    </Typography>
+                    <Button
+                      variant="outlined"
+                      component="label"
+                      fullWidth
+                      startIcon={<UploadFileIcon />}
+                      sx={{ py: 2, borderStyle: 'dashed', borderRadius: 3 }}
+                    >
+                      {evidenceFile ? evidenceFile.name : 'Choose File (Image or PDF)'}
+                      <input type="file" hidden accept="image/*,.pdf" onChange={(e) => setEvidenceFile(e.target.files[0])} />
+                    </Button>
+                  </Box>
+                )}
+
+                {activeStep === 2 && (
+                  <Box>
+                    <Typography variant="subtitle1" fontWeight={700} gutterBottom>Review & Submit</Typography>
+                    <Paper sx={{ p: 2, bgcolor: '#f1f5f9', borderRadius: 2 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                        <Typography variant="body2" color="text.secondary">Amount:</Typography>
+                        <Typography variant="body2" fontWeight={700}>KES {Number(amountPaid).toLocaleString()}</Typography>
+                      </Box>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                        <Typography variant="body2" color="text.secondary">Method:</Typography>
+                        <Typography variant="body2" fontWeight={700}>{paymentMethod}</Typography>
+                      </Box>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                        <Typography variant="body2" color="text.secondary">Reference:</Typography>
+                        <Typography variant="body2" fontWeight={700}>{transactionRef || 'N/A'}</Typography>
+                      </Box>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography variant="body2" color="text.secondary">Proof Attached:</Typography>
+                        <Typography variant="body2" fontWeight={700} color={evidenceFile ? 'success.main' : 'text.secondary'}>
+                          {evidenceFile ? 'Yes' : 'No'}
+                        </Typography>
+                      </Box>
+                    </Paper>
+                  </Box>
+                )}
+              </>
+            ) : (
+              <Box sx={{ textAlign: 'center', py: 1 }}>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                  Upload a clear image or PDF of your payment evidence.
+                </Typography>
+                <Button variant="outlined" component="label" fullWidth startIcon={<UploadFileIcon />} sx={{ py: 2, borderStyle: 'dashed', borderRadius: 3 }}>
+                  {evidenceFile ? evidenceFile.name : 'Choose Evidence File'}
+                  <input type="file" hidden accept="image/*,.pdf" onChange={(e) => setEvidenceFile(e.target.files[0])} />
+                </Button>
+              </Box>
+            )}
+          </Box>
         </DialogContent>
-        <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
-          <Button 
-            variant="contained" 
-            onClick={dialogMode === 'PAY' ? handleSubmitNewPayment : handleUploadEvidenceOnly} 
-            disabled={uploading || (dialogMode === 'UPLOAD' && !evidenceFile) || (dialogMode === 'PAY' && (!amountPaid || !monthFor))}
-          >
-            {uploading ? 'Submitting...' : 'Submit'}
-          </Button>
+        <DialogActions sx={{ p: 3, bgcolor: '#f8fafc' }}>
+          {dialogMode === 'PAY' ? (
+            <>
+              {activeStep === 0 ? (
+                <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
+              ) : (
+                <Button onClick={prevStep}>Back</Button>
+              )}
+              {activeStep < 2 ? (
+                <Button variant="contained" onClick={nextStep} disabled={activeStep === 0 && (!amountPaid || !monthFor)}>Continue</Button>
+              ) : (
+                <Button variant="contained" onClick={handleSubmitNewPayment} disabled={uploading}>
+                  {uploading ? <CircularProgress size={24} /> : 'Submit Payment'}
+                </Button>
+              )}
+            </>
+          ) : (
+            <>
+              <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
+              <Button variant="contained" onClick={handleUploadEvidenceOnly} disabled={uploading || !evidenceFile}>
+                {uploading ? <CircularProgress size={24} /> : 'Upload Proof'}
+              </Button>
+            </>
+          )}
         </DialogActions>
       </Dialog>
 

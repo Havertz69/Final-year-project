@@ -66,6 +66,16 @@ export default function PaymentsPage() {
     }
   };
 
+  const handleDecline = async (id) => {
+    try {
+      await adminService.declinePayment(id);
+      setSnack({ open: true, message: 'Payment declined', severity: 'success' });
+      fetchData();
+    } catch (e) {
+      setSnack({ open: true, message: getApiErrorMessage(e, 'Failed to decline payment'), severity: 'error' });
+    }
+  };
+
   if (loading) return <LoadingSpinner />;
   if (error) return <ErrorState message={error} onRetry={fetchData} />;
 
@@ -140,9 +150,12 @@ export default function PaymentsPage() {
                   <Chip label={p.status} size="small"
                     color={p.status === 'PAID' ? 'success' : p.status === 'PENDING' ? 'warning' : p.status === 'OVERDUE' ? 'error' : 'default'} />
                 </TableCell>
-                <TableCell align="right">
+                 <TableCell align="right">
                   {p.status !== 'PAID' && (
-                    <Button size="small" variant="outlined" color="success" onClick={() => handleConfirm(p.id)}>Confirm</Button>
+                    <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+                      <Button size="small" variant="outlined" color="success" onClick={() => handleConfirm(p.id)}>Confirm</Button>
+                      <Button size="small" variant="outlined" color="error" onClick={() => handleDecline(p.id)}>Decline</Button>
+                    </Box>
                   )}
                 </TableCell>
               </TableRow>

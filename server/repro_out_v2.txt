@@ -1,0 +1,25 @@
+﻿=== Reproducing Payment Submission Issue ===
+Found user: bale11@gmail.com
+
+Test 1: Normal payment submission
+Cleaned up payments for 2027-12-01
+Using actual rent: 5500.00
+>>> tenant_submit_payment hit
+>>> Profile fetched: gareth bale - Murang'a Elites - Unit A4
+>>> Payload data: amount_paid=5500.00, month_for=2027-12-01, method=MOBILE_MONEY, ref=TEST_REF_NEW
+>>> Parsed month_date: 2027-12-01
+>>> No existing payment. Creating one.
+>>> DEBUG: Payment.clean: amount_paid=5500.00 (<class 'decimal.Decimal'>), rent=5500.00 (<class 'decimal.Decimal'>)
+>>> Payment created: 6
+Response status: 201
+Response data: {'message': 'Payment submitted successfully', 'payment': {'id': 6, 'amount_paid': '5500.00', 'payment_date': '2026-03-09', 'month_for': '2027-12-01', 'month_for_formatted': 'December 2027', 'due_date': '2027-12-05', 'payment_method': 'MOBILE_MONEY', 'status': 'PAID', 'transaction_reference': 'TEST_REF_NEW', 'is_overdue': False, 'days_overdue': 0, 'evidence': [], 'created_at': '2026-03-09T14:54:06.337653Z'}}
+
+Test 2: Wrong amount submission
+>>> tenant_submit_payment hit
+>>> Profile fetched: gareth bale - Murang'a Elites - Unit A4
+>>> Payload data: amount_paid=999999.99, month_for=2026-05-01, method=MOBILE_MONEY, ref=TEST_REF_NEW
+>>> Parsed month_date: 2026-05-01
+>>> Existing payment found: 3
+>>> Existent is PAID. Halting.
+Response status: 400
+Response data: {'error': 'Payment for May 2026 has already been confirmed.'}

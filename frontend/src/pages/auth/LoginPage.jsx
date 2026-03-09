@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Box, Card, CardContent, Typography, TextField, Button,
-  Alert, CircularProgress, InputAdornment, IconButton, Divider
+  Box, Card, Typography, TextField, Button,
+  Alert, CircularProgress, InputAdornment, IconButton, Grid, Paper
 } from '@mui/material';
 import {
   Email as EmailIcon,
@@ -13,7 +13,7 @@ import {
 } from '@mui/icons-material';
 import useAuth from '../../hooks/useAuth';
 
-const BG_IMAGE = "/landing-bg.png";
+const HERO_IMAGE = "/login-hero.png";
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -47,7 +47,7 @@ export default function LoginPage() {
     setApiError('');
     try {
       const r = await login(email, password);
-      navigate(r === 'admin' ? '/admin/dashboard' : '/tenant/dashboard', { replace: true });
+      // Success is handled by the useEffect above
     } catch (err) {
       setApiError(err.errorMessage || 'Login failed. Please check your credentials.');
     } finally {
@@ -57,145 +57,230 @@ export default function LoginPage() {
 
   return (
     <Box sx={{
-      height: '100vh',
+      minHeight: '100vh',
       width: '100vw',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      position: 'relative',
-      overflow: 'hidden',
-      backgroundImage: `url("${BG_IMAGE}")`,
-      backgroundSize: 'cover',
-      backgroundPosition: 'center',
-      '&::before': {
-        content: '""',
-        position: 'absolute',
-        top: 0, left: 0, right: 0, bottom: 0,
-        bgcolor: 'rgba(10, 15, 30, 0.75)',
-        backdropFilter: 'blur(3px)',
-        zIndex: 1
-      }
+      background: 'linear-gradient(135deg, #f0f7ff 0%, #ffffff 100%)',
+      p: 2
     }}>
       <Card sx={{
-        maxWidth: 400,
+        maxWidth: 1100,
         width: '100%',
-        zIndex: 2,
-        borderRadius: 4,
-        bgcolor: 'rgba(255, 255, 255, 0.95)',
-        backdropFilter: 'blur(10px)',
-        boxShadow: '0 32px 64px -12px rgba(0, 0, 0, 0.6)',
-        m: 2
+        display: 'flex',
+        flexDirection: { xs: 'column', md: 'row' },
+        borderRadius: '24px',
+        boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)',
+        overflow: 'hidden',
+        minHeight: { md: 650 }
       }}>
-        <CardContent sx={{ p: { xs: 3, md: 5 } }}>
-          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 4 }}>
-            <Box sx={{
-              bgcolor: 'primary.main',
-              borderRadius: 2.5,
-              p: 1.2,
-              mb: 1.5,
-              display: 'flex',
-              boxShadow: '0 8px 16px rgba(99, 102, 241, 0.3)'
-            }}>
-              <HomeWorkIcon sx={{ fontSize: 28, color: '#fff' }} />
-            </Box>
-            <Typography variant="h5" sx={{ fontWeight: 800, color: '#1E293B', letterSpacing: '-0.02em' }}>
-              Property<span style={{ color: '#6366F1' }}>Pulse</span>
+        {/* Left Side: Hero Image */}
+        <Grid item xs={12} md={6} sx={{ 
+          display: { xs: 'none', md: 'block' },
+          position: 'relative',
+          overflow: 'hidden'
+        }}>
+          <Box
+            component="img"
+            src={HERO_IMAGE}
+            alt="Modern Interior"
+            sx={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              transition: 'transform 0.5s ease',
+              '&:hover': {
+                transform: 'scale(1.02)'
+              }
+            }}
+          />
+          <Box sx={{
+            position: 'absolute',
+            bottom: 40,
+            left: 40,
+            color: 'white',
+            zIndex: 2,
+            textShadow: '0 2px 10px rgba(0,0,0,0.5)'
+          }}>
+            <Typography variant="h4" sx={{ fontWeight: 800, mb: 1, letterSpacing: '-0.02em' }}>
+              Elevate Your <br /> Living Experience
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, fontWeight: 500 }}>
-              Management Portal
+            <Typography variant="body1" sx={{ opacity: 0.9, fontWeight: 500 }}>
+              Premium Rental Management System
+            </Typography>
+          </Box>
+          <Box sx={{
+            position: 'absolute',
+            top: 0, left: 0, right: 0, bottom: 0,
+            background: 'linear-gradient(to top, rgba(0,0,0,0.4) 0%, transparent 100%)',
+            pointerEvents: 'none'
+          }} />
+        </Grid>
+
+        {/* Right Side: Login Form */}
+        <Box sx={{ 
+          flex: 1, 
+          p: { xs: 4, md: 6, lg: 8 }, 
+          display: 'flex', 
+          flexDirection: 'column',
+          justifyContent: 'center',
+          position: 'relative'
+        }}>
+          <Box sx={{ mb: 4 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+              <Paper elevation={0} sx={{ 
+                bgcolor: '#3b82f6', 
+                p: 0.8, 
+                borderRadius: '10px', 
+                display: 'flex',
+                boxShadow: '0 8px 16px rgba(59, 130, 246, 0.2)'
+              }}>
+                <HomeWorkIcon sx={{ color: 'white', fontSize: 24 }} />
+              </Paper>
+              <Typography variant="h6" sx={{ ml: 1.5, fontWeight: 700, color: '#1e293b', fontSize: '1.1rem' }}>
+                PropertyPulse
+              </Typography>
+            </Box>
+            <Typography variant="h4" sx={{ 
+              fontWeight: 800, 
+              color: '#1e293b', 
+              mb: 1,
+              letterSpacing: '-0.02em',
+              fontSize: { xs: '1.75rem', md: '2.25rem' }
+            }}>
+              Rental House Management System
+            </Typography>
+            <Typography variant="body1" sx={{ color: '#64748b', fontWeight: 500 }}>
+              Welcome back! Please login to your account.
             </Typography>
           </Box>
 
-          {apiError && <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }}>{apiError}</Alert>}
+          {apiError && (
+            <Alert severity="error" sx={{ mb: 3, borderRadius: '12px', fontWeight: 500 }}>
+              {apiError}
+            </Alert>
+          )}
 
           <form onSubmit={handleSubmit} noValidate>
-            <TextField
-              label="Email"
-              type="email"
-              fullWidth
-              variant="outlined"
-              margin="normal"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              error={!!errors.email}
-              helperText={errors.email}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <EmailIcon color="action" fontSize="small" />
-                  </InputAdornment>
-                ),
-                sx: { borderRadius: 3 }
-              }}
-            />
-            <TextField
-              label="Password"
-              type={showPassword ? 'text' : 'password'}
-              fullWidth
-              variant="outlined"
-              margin="normal"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              error={!!errors.password}
-              helperText={errors.password}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <LockIcon color="action" fontSize="small" />
-                  </InputAdornment>
-                ),
-                endAdornment: (
-                  <InputAdornment position="end">
-                    <IconButton onClick={() => setShowPassword(!showPassword)} edge="end" size="small">
-                      {showPassword ? <VisibilityOff /> : <Visibility />}
-                    </IconButton>
-                  </InputAdornment>
-                ),
-                sx: { borderRadius: 3 }
-              }}
-            />
-            <Button
-              type="submit"
-              variant="contained"
-              fullWidth
-              size="large"
-              sx={{
-                mt: 4, py: 1.6,
-                borderRadius: 3,
-                fontWeight: 700,
-                textTransform: 'none',
-                fontSize: '1rem',
-                boxShadow: '0 8px 24px rgba(99, 102, 241, 0.4)',
-                '&:hover': { transform: 'translateY(-1px)' },
-                transition: 'all 0.2s'
-              }}
-              disabled={loading}
-            >
-              {loading ? <CircularProgress size={24} color="inherit" /> : 'Sign In to Portal'}
-            </Button>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+              <TextField
+                label="Email address"
+                type="email"
+                fullWidth
+                variant="outlined"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                error={!!errors.email}
+                helperText={errors.email}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <EmailIcon sx={{ color: '#94a3b8', fontSize: 20 }} />
+                    </InputAdornment>
+                  ),
+                  sx: { 
+                    borderRadius: '50px',
+                    bgcolor: '#f8fafc',
+                    '& fieldset': { border: '1px solid #e2e8f0' },
+                    '&:hover fieldset': { borderColor: '#3b82f6 !important' },
+                  }
+                }}
+              />
+              <TextField
+                label="Password"
+                type={showPassword ? 'text' : 'password'}
+                fullWidth
+                variant="outlined"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                error={!!errors.password}
+                helperText={errors.password}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <LockIcon sx={{ color: '#94a3b8', fontSize: 20 }} />
+                    </InputAdornment>
+                  ),
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton onClick={() => setShowPassword(!showPassword)} edge="end" size="small">
+                        {showPassword ? <VisibilityOff sx={{ fontSize: 20 }} /> : <Visibility sx={{ fontSize: 20 }} />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                  sx: { 
+                    borderRadius: '50px',
+                    bgcolor: '#f8fafc',
+                    '& fieldset': { border: '1px solid #e2e8f0' },
+                    '&:hover fieldset': { borderColor: '#3b82f6 !important' },
+                  }
+                }}
+              />
+              
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: -1 }}>
+                <Button variant="text" sx={{ 
+                  color: '#3b82f6', 
+                  fontSize: '0.875rem', 
+                  fontWeight: 600,
+                  textTransform: 'none',
+                  '&:hover': { bgcolor: 'transparent', textDecoration: 'underline' }
+                }}>
+                  Forgot password?
+                </Button>
+              </Box>
+
+              <Button
+                type="submit"
+                variant="contained"
+                fullWidth
+                disabled={loading}
+                sx={{
+                  mt: 1,
+                  py: 1.8,
+                  borderRadius: '50px',
+                  bgcolor: '#3b82f6',
+                  boxShadow: '0 10px 20px rgba(59, 130, 246, 0.2)',
+                  fontWeight: 700,
+                  fontSize: '1rem',
+                  textTransform: 'none',
+                  '&:hover': {
+                    bgcolor: '#2563eb',
+                    transform: 'translateY(-1px)',
+                    boxShadow: '0 12px 24px rgba(59, 130, 246, 0.3)',
+                  },
+                  transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                }}
+              >
+                {loading ? <CircularProgress size={24} color="inherit" /> : 'Login to Account'}
+              </Button>
+            </Box>
           </form>
 
-          <Box sx={{ mt: 4, pt: 3, borderTop: '1px solid #E2E8F0', textAlign: 'center' }}>
-            <Box sx={{ display: 'flex', justifyContent: 'center', gap: 3 }}>
-              <Box>
-                <Typography variant="h6" sx={{ fontWeight: 800, color: 'primary.main', mb: -0.5 }}>100%</Typography>
-                <Typography variant="caption" color="text.secondary">Secure</Typography>
-              </Box>
-              <Divider orientation="vertical" flexItem />
-              <Box>
-                <Typography variant="h6" sx={{ fontWeight: 800, color: 'primary.main', mb: -0.5 }}>Real-time</Typography>
-                <Typography variant="caption" color="text.secondary">Alerts</Typography>
-              </Box>
-            </Box>
+          <Box sx={{ mt: 4, textAlign: 'center' }}>
+            <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 500 }}>
+              Don't have an account?{' '}
+              <Button variant="text" sx={{ 
+                color: '#3b82f6', 
+                fontWeight: 700, 
+                textTransform: 'none',
+                minWidth: 0,
+                p: 0,
+                ml: 0.5,
+                '&:hover': { bgcolor: 'transparent', textDecoration: 'underline' }
+              }}>
+                Contact management
+              </Button>
+            </Typography>
           </Box>
-        </CardContent>
-      </Card>
 
-      <Box sx={{ position: 'absolute', bottom: 20, zIndex: 2, textAlign: 'center', width: '100%' }}>
-        <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.75rem' }}>
-          © {new Date().getFullYear()} PropertyPulse PMS. Authorized Personnel Only.
-        </Typography>
-      </Box>
+          <Box sx={{ mt: 8, pt: 2, borderTop: '1px solid #f1f5f9', textAlign: 'center' }}>
+            <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 500 }}>
+              © {new Date().getFullYear()} PropertyPulse PMS. All rights reserved.
+            </Typography>
+          </Box>
+        </Box>
+      </Card>
     </Box>
   );
 }

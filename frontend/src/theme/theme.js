@@ -33,16 +33,24 @@ const theme = createTheme({
     },
   },
   typography: {
-    fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
-    h4: { fontWeight: 700 },
-    h5: { fontWeight: 600 },
-    h6: { fontWeight: 600 },
+    fontFamily: '"WDXL Lubrifont TC", "Inter", "Roboto", "Helvetica", "Arial", sans-serif',
+    h4: { fontWeight: 800 },
+    h5: { fontWeight: 800 },
+    h6: { fontWeight: 800 },
     subtitle1: { fontWeight: 500 },
   },
   shape: {
     borderRadius: 12,
   },
   components: {
+    MuiCssBaseline: {
+      styleOverrides: {
+        '::selection': {
+          backgroundColor: '#00f5ff',
+          color: '#0a0a23',
+        },
+      },
+    },
     MuiCard: {
       styleOverrides: {
         root: {

@@ -12,7 +12,8 @@ const adminService = {
   unassignTenant: (id) => api.post(`/unassign-tenant/${id}/`),
   getPayments: () => api.get('/payments/'),
   confirmPayment: (id) => api.post(`/payments/${id}/confirm/`),
-  getReports: () => api.get('/smart/monthly-report/'),
+  declinePayment: (id) => api.post(`/payments/${id}/decline/`),
+  getReports: (year, month) => api.get('/smart/monthly-report/', { params: { year, month } }),
   getMaintenance: (params) => api.get('/maintenance/', { params }),
   updateMaintenance: (id, data) => api.patch(`/maintenance/${id}/`, data),
   getRevenueTrends: (months = 12) => api.get(`/reports/revenue-trends/?months=${months}`),
@@ -21,6 +22,7 @@ const adminService = {
   sendChatMessage: (data) => api.post('/messages/', data),
   getPaymentEvidence: () => api.get('/payment-evidence/'),
   updatePaymentEvidence: (id, data) => api.patch(`/payment-evidence/${id}/`, data),
+  exportReportPDF: (year, month) => api.get(`/smart/reports/export-pdf/`, { params: { year, month }, responseType: 'blob' }),
 };
 
 export default adminService;

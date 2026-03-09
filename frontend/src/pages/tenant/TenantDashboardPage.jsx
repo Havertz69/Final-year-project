@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Card, CardContent, Typography, Box, Grid,
   Skeleton, Divider, Paper, Avatar,
@@ -11,9 +11,11 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import LoadingSpinner from '../../components/common/LoadingSpinner';
 import ErrorState from '../../components/common/ErrorState';
 import EmptyState from '../../components/common/EmptyState';
 import tenantService from '../../services/tenantService';
+import { getApiErrorMessage, parseListResponse } from '../../utils/apiUtils';
 
 /* ── design tokens ──────────────────────────────────────────────── */
 const T = {
@@ -142,8 +144,9 @@ export default function TenantDashboardPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  if (loading) return <LoadingSpinner />;
   if (error) return <ErrorState message={error} onRetry={fetchData} />;
-  if (!loading && !data) return <EmptyState message="No dashboard data" />;
+  if (!data) return <EmptyState message="No dashboard data found" />;
 
   const unitInfo = data?.unit_info;
   const paymentSummary = data?.payment_summary;

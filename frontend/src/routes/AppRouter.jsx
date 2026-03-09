@@ -3,6 +3,7 @@ import AdminRoutes from './AdminRoutes';
 import TenantRoutes from './TenantRoutes';
 import AdminLayout from '../components/admin/AdminLayout';
 import TenantLayout from '../components/tenant/TenantLayout';
+import LandingPage from '../pages/LandingPage';
 import LoginPage from '../pages/auth/LoginPage';
 import UnauthorizedPage from '../pages/UnauthorizedPage';
 import DashboardPage from '../pages/admin/DashboardPage';
@@ -24,7 +25,7 @@ import TenantNotificationsPage from '../pages/tenant/TenantNotificationsPage';
 export default function AppRouter() {
   return (
     <Routes>
-      <Route path="/" element={<LoginPage />} />
+      <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
       <Route path="/admin" element={<AdminRoutes />}>

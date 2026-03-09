@@ -2,36 +2,44 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Box, Typography, Card, CardContent, Grid, Button,
   Divider, TextField, Dialog, DialogTitle, DialogContent, DialogActions,
-  Snackbar, Alert, IconButton, Chip, Avatar,
+  Snackbar, Alert, IconButton, Chip, Avatar, CircularProgress, Paper
 } from '@mui/material';
-import EditIcon from '@mui/icons-material/Edit';
-import LockIcon from '@mui/icons-material/Lock';
-import PersonIcon from '@mui/icons-material/Person';
-import ApartmentIcon from '@mui/icons-material/Apartment';
-import GavelIcon from '@mui/icons-material/Gavel';
+import {
+  Edit as EditIcon,
+  Lock as LockIcon,
+  Person as PersonIcon,
+  Apartment as ApartmentIcon,
+  Gavel as GavelIcon,
+  Phone as PhoneIcon,
+  Email as EmailIcon
+} from '@mui/icons-material';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import ErrorState from '../../components/common/ErrorState';
 import tenantService from '../../services/tenantService';
 import TenantPageShell from '../../components/tenant/TenantPageShell';
+import { getApiErrorMessage } from '../../utils/apiUtils';
 
-function InfoRow({ label, value }) {
+function InfoRow({ label, value, icon }) {
   return (
-    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 0.75, borderBottom: '1px solid #F1F5F9' }}>
-      <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>{label}</Typography>
-      <Typography variant="body2" sx={{ fontWeight: 600, color: '#1E293B' }}>{value || '—'}</Typography>
+    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 1.5, borderBottom: '1px solid #F1F5F9' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+        {icon && <Box sx={{ display: 'flex', color: 'text.secondary' }}>{icon}</Box>}
+        <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>{label}</Typography>
+      </Box>
+      <Typography variant="body2" sx={{ fontWeight: 700, color: '#1E293B' }}>{value || '—'}</Typography>
     </Box>
   );
 }
 
 function SectionCard({ icon, title, children }) {
   return (
-    <Card elevation={0} sx={{ borderRadius: 3, border: '1px solid #E2E8F0', height: '100%' }}>
+    <Card elevation={0} sx={{ borderRadius: 4, border: '1px solid #E2E8F0', height: '100%', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
       <CardContent sx={{ p: 3 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-          <Box sx={{ bgcolor: '#EFF6FF', borderRadius: 2, p: 0.8, mr: 1.5, display: 'flex' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2.5 }}>
+          <Box sx={{ bgcolor: '#EFF6FF', borderRadius: 2, p: 1, mr: 2, display: 'flex', color: '#2563EB' }}>
             {icon}
           </Box>
-          <Typography sx={{ fontWeight: 700, fontSize: '1rem', color: '#1E293B' }}>{title}</Typography>
+          <Typography sx={{ fontWeight: 800, fontSize: '1.1rem', color: '#1E293B' }}>{title}</Typography>
         </Box>
         <Divider sx={{ mb: 2 }} />
         {children}
@@ -58,7 +66,7 @@ export default function TenantProfilePage() {
       setProfile(res.data);
       setEditForm({ email: res.data.email || '', phone: res.data.phone_number || '' });
     } catch (e) {
-      setError(e.response?.data?.error || e.message || 'Failed to load profile');
+      setError(getApiErrorMessage(e, 'Failed to load profile'));
     } finally {
       setLoading(false);
     }
@@ -70,11 +78,11 @@ export default function TenantProfilePage() {
     setSaving(true);
     try {
       await tenantService.updateProfile(editForm);
-      setSnack({ open: true, message: 'Profile updated successfully', severity: 'success' });
+      setSnack({ open: true, message: 'Profile updated successfully!', severity: 'success' });
       setEditDialogOpen(false);
       fetchProfile();
     } catch (e) {
-      setSnack({ open: true, message: e.response?.data?.error || 'Update failed', severity: 'error' });
+      setSnack({ open: true, message: getApiErrorMessage(e, 'Update failed'), severity: 'error' });
     } finally { setSaving(false); }
   };
 
@@ -93,7 +101,7 @@ export default function TenantProfilePage() {
       setPasswordDialogOpen(false);
       setPasswordForm({ old_password: '', new_password: '', confirm_password: '' });
     } catch (e) {
-      setSnack({ open: true, message: e.response?.data?.error || 'Failed to change password', severity: 'error' });
+      setSnack({ open: true, message: getApiErrorMessage(e, 'Failed to change password'), severity: 'error' });
     } finally { setSaving(false); }
   };
 
@@ -109,31 +117,43 @@ export default function TenantProfilePage() {
 
         {/* Account Info */}
         <Grid item xs={12} md={6}>
-          <SectionCard icon={<PersonIcon sx={{ color: '#2563EB', fontSize: 20 }} />} title="Account Information">
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-              <Avatar sx={{ bgcolor: '#2563EB', width: 48, height: 48, fontWeight: 700 }}>
+          <SectionCard icon={<PersonIcon sx={{ fontSize: 20 }} />} title="Account Details">
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2.5, mb: 3 }}>
+              <Avatar sx={{ 
+                bgcolor: '#2563EB', 
+                width: 56, 
+                height: 56, 
+                fontWeight: 800,
+                boxShadow: '0 4px 12px rgba(37,99,235,0.2)'
+              }}>
                 {profile?.full_name?.charAt(0) || 'T'}
               </Avatar>
               <Box>
-                <Typography fontWeight={700} color="#1E293B">{profile?.full_name}</Typography>
-                <Typography variant="caption" color="text.secondary">Tenant</Typography>
+                <Typography variant="h6" fontWeight={800} color="#1E293B">{profile?.full_name}</Typography>
+                <Chip label="Tenant Account" size="small" variant="outlined" sx={{ fontWeight: 700, mt: 0.5 }} />
               </Box>
             </Box>
-            <InfoRow label="Email" value={profile?.email} />
-            <InfoRow label="Phone" value={profile?.phone_number} />
-            <InfoRow label="Member Since" value={profile?.move_in_date} />
-            <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
+            <InfoRow label="Email Address" value={profile?.email} icon={<EmailIcon fontSize="small" />} />
+            <InfoRow label="Phone Number" value={profile?.phone_number} icon={<PhoneIcon fontSize="small" />} />
+            <InfoRow label="Registration Date" value={profile?.move_in_date} />
+            
+            <Box sx={{ display: 'flex', gap: 1.5, mt: 3 }}>
               <Button
-                size="small" variant="outlined" startIcon={<EditIcon />}
+                variant="outlined" 
+                startIcon={<EditIcon />}
                 onClick={() => setEditDialogOpen(true)}
+                sx={{ borderRadius: 2 }}
               >
-                Edit Profile
+                Edit
               </Button>
               <Button
-                size="small" variant="outlined" color="warning" startIcon={<LockIcon />}
+                variant="outlined" 
+                color="warning" 
+                startIcon={<LockIcon />}
                 onClick={() => setPasswordDialogOpen(true)}
+                sx={{ borderRadius: 2 }}
               >
-                Change Password
+                Password
               </Button>
             </Box>
           </SectionCard>
@@ -208,51 +228,52 @@ export default function TenantProfilePage() {
 
       {/* Edit Profile Dialog */}
       <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>Edit Profile</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 800 }}>Update Profile</DialogTitle>
         <DialogContent sx={{ pt: 2 }}>
           <TextField
-            label="Email" fullWidth margin="dense" type="email"
+            label="Email Address" fullWidth margin="normal" type="email"
             value={editForm.email}
             onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))}
           />
           <TextField
-            label="Phone Number" fullWidth margin="dense"
+            label="Phone Number" fullWidth margin="normal"
             value={editForm.phone}
             onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))}
           />
         </DialogContent>
-        <DialogActions sx={{ p: 2 }}>
+        <DialogActions sx={{ p: 2.5, bgcolor: '#f8fafc' }}>
           <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
           <Button variant="contained" onClick={handleSaveProfile} disabled={saving}>
-            {saving ? 'Saving…' : 'Save Changes'}
+            {saving ? <CircularProgress size={24} /> : 'Save Changes'}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Change Password Dialog */}
       <Dialog open={passwordDialogOpen} onClose={() => setPasswordDialogOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>Change Password</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 800 }}>Change Security Password</DialogTitle>
         <DialogContent sx={{ pt: 2 }}>
           <TextField
-            label="Current Password" fullWidth margin="dense" type="password"
+            label="Current Password" fullWidth margin="normal" type="password"
             value={passwordForm.old_password}
             onChange={e => setPasswordForm(f => ({ ...f, old_password: e.target.value }))}
           />
+          <Divider sx={{ my: 2 }}>New Credentials</Divider>
           <TextField
-            label="New Password" fullWidth margin="dense" type="password"
+            label="New Password" fullWidth margin="normal" type="password"
             value={passwordForm.new_password}
             onChange={e => setPasswordForm(f => ({ ...f, new_password: e.target.value }))}
           />
           <TextField
-            label="Confirm New Password" fullWidth margin="dense" type="password"
+            label="Confirm New Password" fullWidth margin="normal" type="password"
             value={passwordForm.confirm_password}
             onChange={e => setPasswordForm(f => ({ ...f, confirm_password: e.target.value }))}
           />
         </DialogContent>
-        <DialogActions sx={{ p: 2 }}>
+        <DialogActions sx={{ p: 2.5, bgcolor: '#f8fafc' }}>
           <Button onClick={() => setPasswordDialogOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleChangePassword} disabled={saving}>
-            {saving ? 'Saving…' : 'Change Password'}
+          <Button variant="contained" color="warning" onClick={handleChangePassword} disabled={saving}>
+            {saving ? <CircularProgress size={24} /> : 'Update Password'}
           </Button>
         </DialogActions>
       </Dialog>

@@ -1,18 +1,22 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box, Typography, Paper, List, ListItem, ListItemText, ListItemIcon,
   IconButton, Chip, Button, Checkbox, Snackbar, Alert, Divider,
 } from '@mui/material';
-import MarkEmailReadIcon from '@mui/icons-material/MarkEmailRead';
-import NotificationsIcon from '@mui/icons-material/Notifications';
-import PaymentIcon from '@mui/icons-material/Payment';
-import BuildIcon from '@mui/icons-material/Build';
-import AssignmentIcon from '@mui/icons-material/Assignment';
+import {
+  MarkEmailRead as MarkEmailReadIcon,
+  Notifications as NotificationsIcon,
+  Payment as PaymentIcon,
+  Build as BuildIcon,
+  Assignment as AssignmentIcon,
+  DoneAll as DoneAllIcon
+} from '@mui/icons-material';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import EmptyState from '../../components/common/EmptyState';
 import ErrorState from '../../components/common/ErrorState';
 import tenantService from '../../services/tenantService';
 import TenantPageShell from '../../components/tenant/TenantPageShell';
+import { getApiErrorMessage } from '../../utils/apiUtils';
 
 const typeIcons = {
   PAYMENT_CONFIRMED: <PaymentIcon color="success" />,
@@ -37,7 +41,7 @@ export default function TenantNotificationsPage() {
       const res = await tenantService.getNotifications();
       setNotifications(res.data || []);
     } catch (e) {
-      setError(e.response?.data?.message || 'Failed to load notifications');
+      setError(getApiErrorMessage(e, 'Failed to load notifications'));
     } finally {
       setLoading(false);
     }
@@ -64,7 +68,19 @@ export default function TenantNotificationsPage() {
       setSelectedIds([]);
       fetchNotifications();
     } catch (e) {
-      setSnack({ open: true, message: e.response?.data?.message || 'Failed', severity: 'error' });
+      setSnack({ open: true, message: getApiErrorMessage(e, 'Failed to mark read'), severity: 'error' });
+    }
+  };
+
+  const handleMarkAllRead = async () => {
+    const unreadIds = notifications.filter(n => !n.is_read).map(n => n.id);
+    if (unreadIds.length === 0) return;
+    try {
+      await tenantService.markNotificationsRead({ notification_ids: unreadIds });
+      setSnack({ open: true, message: 'All notifications marked as read', severity: 'success' });
+      fetchNotifications();
+    } catch (e) {
+      setSnack({ open: true, message: getApiErrorMessage(e, 'Failed to mark all read'), severity: 'error' });
     }
   };
 
@@ -78,23 +94,27 @@ export default function TenantNotificationsPage() {
       title="Notifications"
       subtitle={`You have ${unreadCount} unread notification${unreadCount !== 1 ? 's' : ''}.`}
       right={
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-          <Button
-            variant="text"
-            size="small"
-            onClick={handleSelectAll}
-            sx={{ color: 'white' }}
-          >
-            {selectedIds.length === unreadCount ? 'Deselect All' : 'Select All'}
-          </Button>
+        <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
+          {unreadCount > 0 && (
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleMarkAllRead}
+              startIcon={<DoneAllIcon />}
+              sx={{ borderRadius: 2 }}
+            >
+              Mark All Read
+            </Button>
+          )}
           <Button
             variant="contained"
             size="small"
             disabled={selectedIds.length === 0}
             onClick={handleMarkRead}
             startIcon={<MarkEmailReadIcon />}
+            sx={{ borderRadius: 2 }}
           >
-            Mark Read
+            Mark {selectedIds.length > 0 ? selectedIds.length : ''} Read
           </Button>
         </Box>
       }
@@ -127,6 +147,7 @@ export default function TenantNotificationsPage() {
                   </ListItemIcon>
                   <ListItemText
                     primary={notif.title}
+                    secondaryTypographyProps={{ component: 'div' }}
                     secondary={
                       <Box>
                         <Typography variant="body2" color="text.secondary">

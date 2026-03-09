@@ -1,31 +1,55 @@
-import { useState, useRef, useEffect } from 'react';
-import { Box, Typography, Card, CardContent, TextField, IconButton, Paper, CircularProgress, Divider } from '@mui/material';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { 
+  Box, Typography, Card, CardContent, TextField, IconButton, 
+  Paper, CircularProgress, Divider, Avatar 
+} from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
+import SmartToyIcon from '@mui/icons-material/SmartToy';
+import PersonIcon from '@mui/icons-material/Person';
 import tenantService from '../../services/tenantService';
 import TenantPageShell from '../../components/tenant/TenantPageShell';
+import { getApiErrorMessage } from '../../utils/apiUtils';
 
 export default function TenantChatbotPage() {
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState([
+    { role: 'assistant', content: 'Hello! I am your property assistant. How can I help you today?' }
+  ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const endRef = useRef(null);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  const scrollToBottom = useCallback(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, []);
+
+  useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
 
   const handleSend = async () => {
     const text = input.trim();
     if (!text || loading) return;
+
     const userMsg = { role: 'user', content: text };
-    const history = [...messages, userMsg];
-    setMessages(history);
+    setMessages(prev => [...prev, userMsg]);
     setInput('');
     setLoading(true);
+
     try {
-      const res = await tenantService.sendChatMessage({ message: text, history });
-      setMessages([...history, { role: 'assistant', content: res.data.reply || res.data.message }]);
-    } catch {
-      setMessages([...history, { role: 'assistant', content: 'Error: Could not get a response.' }]);
-    } finally { setLoading(false); }
+      const res = await tenantService.sendChatMessage({ 
+        message: text, 
+        history: messages 
+      });
+      setMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: res.data.reply || res.data.message 
+      }]);
+    } catch (e) {
+      setMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: getApiErrorMessage(e, 'I encountered an error. Please try again.') 
+      }]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -33,60 +57,81 @@ export default function TenantChatbotPage() {
       title="Chat Assistant"
       subtitle="Ask about rent, payments, or general help."
     >
-      <Card sx={{ borderRadius: 4, overflow: 'hidden' }}>
+      <Card sx={{ borderRadius: 4, overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.05)' }}>
         <CardContent sx={{ p: 0 }}>
-          <Box sx={{ p: 2.5, bgcolor: 'grey.50' }}>
-            <Typography variant="subtitle1" fontWeight={700}>Conversation</Typography>
-            <Typography variant="body2" color="text.secondary">Your messages stay on this device.</Typography>
+          <Box sx={{ p: 2, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+            <Typography variant="subtitle2" fontWeight={700}>AI Assistant</Typography>
+            <Typography variant="caption" color="text.secondary">Ask about rent, maintenance, or policies.</Typography>
           </Box>
-          <Divider />
-          <Box sx={{ height: { xs: '60vh', md: '62vh' }, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 1.5, p: 2.5 }}>
-          {messages.length === 0 && (
-            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 4 }}>
-              Start a conversation...
-            </Typography>
-          )}
-          {messages.map((m, i) => (
-            <Paper key={i} elevation={0}
-              sx={{
-                p: 1.5,
-                maxWidth: { xs: '90%', md: '75%' },
-                borderRadius: 3,
-                alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-                bgcolor: m.role === 'user' ? 'primary.main' : 'background.paper',
-                color: m.role === 'user' ? 'primary.contrastText' : 'text.primary',
-                border: m.role === 'user' ? 'none' : '1px solid',
-                borderColor: m.role === 'user' ? 'transparent' : 'divider',
+          
+          <Box sx={{ 
+            height: '60vh', 
+            overflow: 'auto', 
+            p: 3, 
+            display: 'flex', 
+            flexDirection: 'column', 
+            gap: 2,
+            bgcolor: '#ffffff'
+          }}>
+            {messages.map((m, i) => (
+              <Box key={i} sx={{ 
+                display: 'flex', 
+                flexDirection: m.role === 'user' ? 'row-reverse' : 'row',
+                gap: 1.5,
+                alignItems: 'flex-end',
+                mb: 1
               }}>
-              <Typography variant="body2">{m.content}</Typography>
-            </Paper>
-          ))}
-          {loading && <CircularProgress size={24} sx={{ alignSelf: 'flex-start', ml: 1 }} />}
-          <div ref={endRef} />
+                <Avatar sx={{ 
+                  width: 32, 
+                  height: 32, 
+                  bgcolor: m.role === 'user' ? 'primary.main' : 'secondary.main',
+                  fontSize: '0.8rem'
+                }}>
+                  {m.role === 'user' ? <PersonIcon fontSize="small" /> : <SmartToyIcon fontSize="small" />}
+                </Avatar>
+                <Paper elevation={0} sx={{
+                  p: 2,
+                  maxWidth: '80%',
+                  borderRadius: m.role === 'user' ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
+                  bgcolor: m.role === 'user' ? 'primary.main' : '#f1f5f9',
+                  color: m.role === 'user' ? '#fff' : '#1e293b',
+                  boxShadow: m.role === 'user' ? '0 4px 12px rgba(37,99,235,0.2)' : 'none'
+                }}>
+                  <Typography variant="body2" sx={{ lineHeight: 1.6 }}>{m.content}</Typography>
+                </Paper>
+              </Box>
+            ))}
+            {loading && (
+              <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
+                <Avatar sx={{ width: 32, height: 32, bgcolor: 'secondary.main' }}>
+                  <SmartToyIcon fontSize="small" />
+                </Avatar>
+                <CircularProgress size={16} />
+              </Box>
+            )}
+            <div ref={endRef} />
           </Box>
+
           <Divider />
-          <Box sx={{ display: 'flex', p: 2, gap: 1.5, bgcolor: 'background.paper' }}>
+          <Box sx={{ p: 2, display: 'flex', gap: 1, bgcolor: '#f8fafc' }}>
             <TextField
               fullWidth
               size="small"
-              placeholder="Type a message..."
+              placeholder="How can I help you today?"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4, bgcolor: '#fff' } }}
             />
-            <IconButton
-              color="primary"
-              onClick={handleSend}
+            <IconButton 
+              color="primary" 
+              onClick={handleSend} 
               disabled={loading || !input.trim()}
-              sx={{
-                width: 44,
-                height: 44,
-                borderRadius: 3,
-                bgcolor: 'primary.main',
-                color: 'primary.contrastText',
+              sx={{ 
+                bgcolor: 'primary.main', 
+                color: '#fff', 
                 '&:hover': { bgcolor: 'primary.dark' },
-                '&.Mui-disabled': { bgcolor: 'action.disabledBackground', color: 'action.disabled' },
+                '&.Mui-disabled': { bgcolor: 'action.disabledBackground' }
               }}
             >
               <SendIcon />

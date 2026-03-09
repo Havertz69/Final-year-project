@@ -51,6 +51,21 @@ export default function ReportsPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  const handleExportPDF = async () => {
+    try {
+      const response = await adminService.exportReportPDF(filters.year, filters.month);
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `Property_Report_${filters.year}_${filters.month.toString().padStart(2, '0')}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+    } catch (e) {
+      setError(getApiErrorMessage(e, 'Failed to download PDF'));
+    }
+  };
+
   if (loading) return <LoadingSpinner />;
   if (error) return <ErrorState message={error} onRetry={fetchData} />;
 
@@ -92,7 +107,7 @@ export default function ReportsPage() {
             {properties.map(p => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
           </Select>
         </FormControl>
-        <Button variant="outlined" startIcon={<DownloadIcon />}>Export PDF</Button>
+        <Button variant="outlined" startIcon={<DownloadIcon />} onClick={handleExportPDF}>Export PDF</Button>
       </Box>
 
       <Grid container spacing={3} sx={{ mb: 4 }}>

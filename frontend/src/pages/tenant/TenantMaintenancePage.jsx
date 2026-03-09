@@ -1,16 +1,22 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box, Typography, Table, TableBody, TableCell, TableContainer, TableHead,
   TableRow, Paper, Button, Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, Snackbar, Alert, Chip, Card, CardContent, IconButton, MenuItem, Select, FormControl, InputLabel
+  TextField, Snackbar, Alert, Chip, Card, CardContent, IconButton, MenuItem, Select, 
+  FormControl, InputLabel, InputAdornment, Grid
 } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
-import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
+import {
+  Add as AddIcon,
+  PhotoCamera as PhotoCameraIcon,
+  Search as SearchIcon,
+  FilterList as FilterListIcon
+} from '@mui/icons-material';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import EmptyState from '../../components/common/EmptyState';
 import ErrorState from '../../components/common/ErrorState';
 import tenantService from '../../services/tenantService';
 import TenantPageShell from '../../components/tenant/TenantPageShell';
+import { getApiErrorMessage, parseListResponse } from '../../utils/apiUtils';
 
 const statusColors = { PENDING: 'warning', IN_PROGRESS: 'info', RESOLVED: 'success' };
 const priorityColors = {
@@ -20,24 +26,12 @@ const priorityColors = {
   EMERGENCY: { bg: '#fef2f2', color: '#dc2626' },
 };
 
-function extractApiError(err, fallback) {
-  const data = err?.response?.data;
-  if (!data) return fallback;
-  if (typeof data === 'string') return data;
-  if (typeof data.message === 'string') return data.message;
-  if (typeof data.error === 'string') return data.error;
-  const fieldErrors = Object.entries(data)
-    .filter(([, v]) => Array.isArray(v))
-    .map(([k, v]) => `${k}: ${v.join(' ')}`)
-    .join(' | ');
-  return fieldErrors || fallback;
-}
-
 export default function TenantMaintenancePage() {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [filters, setFilters] = useState({ search: '', status: '' });
   const [form, setForm] = useState({ title: '', description: '', priority: 'MEDIUM' });
   const [imageFile, setImageFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -47,15 +41,25 @@ export default function TenantMaintenancePage() {
     setLoading(true); setError('');
     try {
       const res = await tenantService.getMaintenance();
-      setRequests(res.data?.results || res.data || []);
+      setRequests(parseListResponse(res.data));
     } catch (e) {
-      setError(extractApiError(e, 'Failed to load'));
+      setError(getApiErrorMessage(e, 'Failed to load maintenance requests'));
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => { fetchRequests(); }, [fetchRequests]);
+
+  const filteredRequests = useMemo(() => {
+    return requests.filter(r => {
+      const matchesSearch = !filters.search || 
+        r.title.toLowerCase().includes(filters.search.toLowerCase()) ||
+        r.description.toLowerCase().includes(filters.search.toLowerCase());
+      const matchesStatus = !filters.status || r.status === filters.status;
+      return matchesSearch && matchesStatus;
+    });
+  }, [requests, filters]);
 
   const handleSubmit = async () => {
     if (!form.title || !form.description) return;
@@ -67,11 +71,13 @@ export default function TenantMaintenancePage() {
       formData.append('priority', form.priority);
       if (imageFile) formData.append('image', imageFile);
       await tenantService.createMaintenance(formData);
-      setSnack({ open: true, message: 'Request submitted', severity: 'success' });
-      setDialogOpen(false); setForm({ title: '', description: '', priority: 'MEDIUM' }); setImageFile(null);
+      setSnack({ open: true, message: 'Request submitted successfully!', severity: 'success' });
+      setDialogOpen(false); 
+      setForm({ title: '', description: '', priority: 'MEDIUM' }); 
+      setImageFile(null);
       fetchRequests();
     } catch (e) {
-      setSnack({ open: true, message: extractApiError(e, 'Failed'), severity: 'error' });
+      setSnack({ open: true, message: getApiErrorMessage(e, 'Failed to submit request'), severity: 'error' });
     } finally { setSubmitting(false); }
   };
 
@@ -80,56 +86,102 @@ export default function TenantMaintenancePage() {
 
   return (
     <TenantPageShell
-      title="Maintenance"
-      subtitle="Submit and track maintenance requests."
+      title="Maintenance Requests"
+      subtitle="Track and report issues in your unit."
       right={
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialogOpen(true)}>
+        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialogOpen(true)} sx={{ borderRadius: 2 }}>
           New Request
         </Button>
       }
     >
-      {requests.length === 0 ? (
-        <Paper elevation={0} sx={{ p: 2 }}>
-          <EmptyState message="No maintenance requests" />
-        </Paper>
+      <Box sx={{ mb: 3, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+        <TextField
+          size="small"
+          placeholder="Search requests..."
+          value={filters.search}
+          onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+          sx={{ minWidth: { xs: '100%', sm: 300 } }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon fontSize="small" color="action" />
+              </InputAdornment>
+            ),
+          }}
+        />
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+          <InputLabel>Status</InputLabel>
+          <Select
+            value={filters.status}
+            label="Status"
+            onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+          >
+            <MenuItem value="">All Statuses</MenuItem>
+            <MenuItem value="PENDING">Pending</MenuItem>
+            <MenuItem value="IN_PROGRESS">In Progress</MenuItem>
+            <MenuItem value="RESOLVED">Resolved</MenuItem>
+          </Select>
+        </FormControl>
+      </Box>
+
+      {filteredRequests.length === 0 ? (
+        <EmptyState 
+          message={requests.length === 0 ? "You haven't submitted any requests yet." : "No requests match your filters."} 
+        />
       ) : (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {requests.map((req) => (
-            <Card key={req.id} elevation={0} sx={{ borderRadius: 4 }}>
-              <CardContent sx={{ p: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                  <Box>
-                    <Typography variant="subtitle2" fontWeight={600}>{req.title}</Typography>
+        <Grid container spacing={2}>
+          {filteredRequests.map((req) => (
+            <Grid item xs={12} md={6} key={req.id}>
+              <Card elevation={0} sx={{ 
+                borderRadius: 4, 
+                border: '1px solid #e2e8f0',
+                transition: 'transform 0.2s',
+                '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }
+              }}>
+                <CardContent sx={{ p: 2.5 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
+                    <Box>
+                      <Typography variant="subtitle2" fontWeight={700}>{req.title}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Submitted: {new Date(req.created_at).toLocaleDateString()}
+                      </Typography>
+                    </Box>
+                    <Chip 
+                      label={req.status} 
+                      size="small" 
+                      color={statusColors[req.status]} 
+                      sx={{ fontWeight: 800, fontSize: '0.65rem', borderRadius: 1.5 }} 
+                    />
+                  </Box>
+                  <Typography variant="body2" color="text.secondary" sx={{ 
+                    mb: 2, 
+                    display: '-webkit-box', 
+                    WebkitLineClamp: 2, 
+                    WebkitBoxOrient: 'vertical', 
+                    overflow: 'hidden' 
+                  }}>
+                    {req.description}
+                  </Typography>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <Chip
-                      label={req.priority}
+                      label={`${req.priority} Priority`}
                       size="small"
                       sx={{
-                        mt: 0.5,
-                        height: 20,
                         fontSize: '0.65rem',
                         fontWeight: 700,
                         bgcolor: priorityColors[req.priority]?.bg,
                         color: priorityColors[req.priority]?.color,
                       }}
                     />
+                    {req.image_url && (
+                       <Button size="small" onClick={() => window.open(req.image_url, '_blank')}>View Photo</Button>
+                    )}
                   </Box>
-                  <Chip label={req.status} size="small" color={statusColors[req.status]} sx={{ fontWeight: 700 }} />
-                </Box>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                  {req.description}
-                </Typography>
-                {req.image_url && (
-                  <Box sx={{ mb: 1 }}>
-                    <img src={req.image_url} alt="maintenance" style={{ maxWidth: '100%', height: 120, objectFit: 'cover', borderRadius: 8 }} />
-                  </Box>
-                )}
-                <Typography variant="caption" color="text.secondary">
-                  {req.unit_number} • {new Date(req.created_at).toLocaleDateString()}
-                </Typography>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </Grid>
           ))}
-        </Box>
+        </Grid>
       )}
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>

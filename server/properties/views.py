@@ -1,3 +1,4 @@
+from decimal import Decimal, InvalidOperation
 from rest_framework import generics, status, permissions, filters
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -644,8 +645,15 @@ class AdminPaymentEvidenceUpdateView(generics.UpdateAPIView):
                     related_payment=payment
                 )
         elif serializer.validated_data.get('status') == 'REJECTED':
-            # Optionally reject payment or keep as pending for re-upload
-            pass
+            payment = instance.payment
+            # Trigger notification for rejection
+            Notification.create_notification(
+                user=payment.tenant.user,
+                title="Payment Evidence Rejected",
+                message=f"Your payment proof for {payment.month_for.strftime('%B %Y')} was rejected. Note: {serializer.validated_data.get('admin_notes', 'No notes provided.')}",
+                notification_type='SYSTEM_ANNOUNCEMENT',
+                related_payment=payment
+            )
 
 
 @api_view(['GET'])
@@ -903,6 +911,43 @@ def confirm_payment(request, payment_id):
         }, status=status.HTTP_404_NOT_FOUND)
 
 
+@api_view(['POST'])
+@permission_classes([AdminOnly])
+def decline_payment(request, payment_id):
+    """
+    Decline a payment (Admin only)
+    """
+    try:
+        payment = Payment.objects.get(id=payment_id)
+        
+        if payment.status == 'PAID':
+            return Response({
+                'error': 'Cannot decline an already paid payment'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        payment.status = 'FAILED'
+        payment.save()
+        
+        # Notify tenant
+        Notification.create_notification(
+            user=payment.tenant.user,
+            title="Payment Declined",
+            message=f"Your payment for {payment.month_for.strftime('%B %Y')} has been declined by the administrator.",
+            notification_type='SYSTEM_ANNOUNCEMENT',
+            related_payment=payment
+        )
+        
+        return Response({
+            'message': 'Payment declined successfully',
+            'payment': PaymentSerializer(payment).data
+        }, status=status.HTTP_200_OK)
+        
+    except Payment.DoesNotExist:
+        return Response({
+            'error': 'Payment not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+
+
 # ==================== SMART FEATURES VIEWS ====================
 
 @api_view(['POST'])
@@ -999,6 +1044,80 @@ def generate_property_report(request, property_id):
         'report': report,
         'generated_at': timezone.now()
     })
+
+
+@api_view(['GET'])
+@permission_classes([AdminOnly])
+def export_report_pdf(request):
+    """
+    Export monthly report as PDF for admin
+    """
+    import io
+    from django.http import HttpResponse
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+
+    year = request.query_params.get('year', date.today().year)
+    month = request.query_params.get('month', date.today().month)
+    
+    try:
+        year = int(year)
+        month = int(month)
+        report = ReportService.generate_monthly_report(year, month)
+    except (ValueError, TypeError):
+        return Response({'error': 'Invalid year or month parameter'}, status=status.HTTP_400_BAD_REQUEST)
+
+    buffer = io.BytesIO()
+    p = canvas.Canvas(buffer, pagesize=letter)
+    
+    # Header
+    p.setFont("Helvetica-Bold", 18)
+    p.drawString(100, 750, f"Property Pulse - Monthly Report ({month}/{year})")
+    p.setFont("Helvetica", 12)
+    p.drawString(100, 730, f"Generated on: {timezone.now().strftime('%Y-%m-%d %H:%M')}")
+    p.line(100, 715, 500, 715)
+    
+    # Financial Overview
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(100, 685, "1. Financial Overview")
+    p.setFont("Helvetica", 12)
+    p.drawString(120, 660, f"Total Expected Revenue: KES {report['expected_revenue']}")
+    p.drawString(120, 640, f"Total Collected Revenue: KES {report['total_revenue']}")
+    p.drawString(120, 620, f"Total Pending Revenue: KES {report['total_pending']}")
+    
+    collection_rate = report['collection_rate']
+    p.drawString(120, 600, f"Collection Rate: {collection_rate:.1f}%")
+
+    # Occupancy Overview
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(100, 560, "2. Occupancy Overview")
+    p.setFont("Helvetica", 12)
+    p.drawString(120, 535, f"Total Units: {report['total_units']}")
+    p.drawString(120, 515, f"Occupied Units: {report['occupied_units']}")
+    p.drawString(120, 495, f"Vacant Units: {report['vacant_units']}")
+    p.drawString(120, 475, f"Occupancy Rate: {report['occupancy_rate']}%")
+
+    # Payment Statuses
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(100, 435, "3. Payment Breakdown")
+    p.setFont("Helvetica", 12)
+    p.drawString(120, 410, f"Paid Count: {report['paid_count']}")
+    p.drawString(120, 390, f"Pending Count: {report['pending_count']}")
+    p.drawString(120, 370, f"Overdue Count: {report['overdue_count']}")
+
+    p.line(100, 340, 500, 340)
+    p.setFont("Helvetica-Oblique", 10)
+    p.drawString(100, 320, "End of report.")
+    
+    p.showPage()
+    p.save()
+    
+    buffer.seek(0)
+    response = HttpResponse(buffer, content_type='application/pdf')
+    filename = f"Property_Report_{year}_{month:02d}.pdf"
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    
+    return response
 
 
 @api_view(['GET'])
@@ -1285,7 +1404,11 @@ def tenant_submit_payment(request):
         profile = TenantProfile.objects.get(user=request.user)
         print(">>> Profile fetched:", profile)
         
-        amount_paid = request.data.get('amount_paid')
+        raw_amount = request.data.get('amount_paid')
+        try:
+            amount_paid = Decimal(str(raw_amount))
+        except (TypeError, ValueError, InvalidOperation):
+            return Response({'error': 'Invalid amount format'}, status=status.HTTP_400_BAD_REQUEST)
         month_for = request.data.get('month_for')
         payment_method = request.data.get('payment_method', 'BANK_TRANSFER')
         transaction_reference = request.data.get('transaction_reference', '')
