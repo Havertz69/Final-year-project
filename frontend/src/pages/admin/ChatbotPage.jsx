@@ -1,65 +1,159 @@
-import { useState, useRef, useEffect } from 'react';
-import { Box, Typography, Card, CardContent, TextField, IconButton, Paper, CircularProgress } from '@mui/material';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  Box, Typography, Paper, TextField, IconButton, List, ListItem,
+  ListItemText, Avatar, Divider, InputAdornment, Fade
+} from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
+import SmartToyIcon from '@mui/icons-material/SmartToy';
+import PersonIcon from '@mui/icons-material/Person';
+import AdminPageShell from '../../components/admin/AdminPageShell';
 import adminService from '../../services/adminService';
+import { getApiErrorMessage, parseListResponse } from '../../utils/apiUtils';
 
 export default function ChatbotPage() {
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState([
+    { id: 'welcome', body: "Hello! I'm your Property Pulse assistant. Ask me about occupancy, revenue, or units.", sender_role: 'ADMIN', timestamp: new Date().toISOString() }
+  ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const endRef = useRef(null);
+  const scrollRef = useRef(null);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  const scrollToBottom = () => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   const handleSend = async () => {
-    const text = input.trim();
-    if (!text || loading) return;
-    const userMsg = { role: 'user', content: text };
-    const history = [...messages, userMsg];
-    setMessages(history);
+    if (!input.trim()) return;
+
+    const userMsg = {
+      id: Date.now(),
+      body: input,
+      sender_role: 'TENANT', // Simplification for UI display
+      timestamp: new Date().toISOString()
+    };
+
+    setMessages(prev => [...prev, userMsg]);
+    const currentInput = input;
     setInput('');
     setLoading(true);
+
     try {
-      const res = await adminService.sendChatMessage({ message: text, history });
-      setMessages([...history, { role: 'assistant', content: res.data.reply || res.data.message }]);
-    } catch {
-      setMessages([...history, { role: 'assistant', content: 'Error: Could not get a response.' }]);
-    } finally { setLoading(false); }
+      // Find an admin ID to "message" for the chatbot logic on backend
+      // In a real app, we might have a dedicated bot user
+      const res = await adminService.sendChatMessage({
+        subject: 'Chatbot',
+        body: currentInput,
+        receiver: 1 // Assuming 1 is an admin
+      });
+      
+      // The backend creates a reply asynchronously or we can poll
+      // For this simplified version, let's just refresh messages after a short delay
+      setTimeout(async () => {
+        try {
+          const mRes = await adminService.getMessages(); // Base messages for chatbot/admin
+          const list = parseListResponse(mRes.data);
+          // Sort by timestamp and update
+          setMessages([
+            { id: 'welcome', body: "Hello! I'm your Property Pulse assistant. Ask me about occupancy, revenue, or units.", sender_role: 'ADMIN', timestamp: new Date().toISOString() },
+            ...list.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+          ]);
+        } catch (e) {
+          console.error("Failed to fetch messages", e);
+        } finally {
+          setLoading(false);
+        }
+      }, 1000);
+
+    } catch (e) {
+      setMessages(prev => [...prev, { 
+        id: 'err', 
+        body: `Error: ${getApiErrorMessage(e)}`, 
+        sender_role: 'ADMIN', 
+        timestamp: new Date().toISOString() 
+      }]);
+      setLoading(false);
+    }
   };
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)' }}>
-      <Typography variant="h5" sx={{ mb: 2 }}>Chatbot</Typography>
-      <Card sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <CardContent sx={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 1, p: 2 }}>
-          {messages.length === 0 && (
-            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 4 }}>
-              Start a conversation...
-            </Typography>
+    <AdminPageShell title="Assistant" subtitle="Chat with the Property Pulse bot for quick insights.">
+      <Paper sx={{ height: '70vh', display: 'flex', flexDirection: 'column', p: 2, borderRadius: 2 }}>
+        <Box 
+          ref={scrollRef}
+          sx={{ flexGrow: 1, overflowY: 'auto', mb: 2, px: 2, py: 1, display: 'flex', flexDirection: 'column', gap: 2 }}
+        >
+          {messages.map((m, i) => {
+            const isMe = m.sender_role !== 'ADMIN';
+            return (
+              <Box 
+                key={m.id || i}
+                sx={{ 
+                  alignSelf: isMe ? 'flex-end' : 'flex-start',
+                  maxWidth: '80%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: isMe ? 'flex-end' : 'flex-start'
+                }}
+              >
+                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 0.5 }}>
+                  {!isMe && <Avatar sx={{ width: 24, height: 24, bgcolor: 'primary.main' }}><SmartToyIcon sx={{ fontSize: 16 }} /></Avatar>}
+                  <Typography variant="caption" color="text.secondary">
+                    {isMe ? 'You' : 'Assistant'} • {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </Typography>
+                  {isMe && <Avatar sx={{ width: 24, height: 24, bgcolor: 'secondary.main' }}><PersonIcon sx={{ fontSize: 16 }} /></Avatar>}
+                </Box>
+                <Paper 
+                  elevation={0}
+                  sx={{ 
+                    p: 1.5, 
+                    bgcolor: isMe ? 'primary.main' : 'grey.100',
+                    color: isMe ? 'white' : 'text.primary',
+                    borderRadius: isMe ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+                  }}
+                >
+                  <Typography variant="body2">{m.body}</Typography>
+                </Paper>
+              </Box>
+            );
+          })}
+          {loading && (
+            <Box sx={{ alignSelf: 'flex-start', display: 'flex', gap: 1, alignItems: 'center' }}>
+              <Avatar sx={{ width: 24, height: 24, bgcolor: 'grey.300' }}><SmartToyIcon sx={{ fontSize: 16, color: 'grey.600' }} /></Avatar>
+              <Typography variant="caption" color="text.secondary">Assistant is thinking...</Typography>
+            </Box>
           )}
-          {messages.map((m, i) => (
-            <Paper key={i} elevation={0}
-              sx={{
-                p: 1.5, maxWidth: '75%', borderRadius: 2,
-                alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-                bgcolor: m.role === 'user' ? 'primary.main' : 'grey.100',
-                color: m.role === 'user' ? 'primary.contrastText' : 'text.primary',
-              }}>
-              <Typography variant="body2">{m.content}</Typography>
-            </Paper>
-          ))}
-          {loading && <CircularProgress size={24} sx={{ alignSelf: 'flex-start', ml: 1 }} />}
-          <div ref={endRef} />
-        </CardContent>
-        <Box sx={{ display: 'flex', p: 2, borderTop: '1px solid', borderColor: 'divider', gap: 1 }}>
-          <TextField fullWidth size="small" placeholder="Type a message..." value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }} />
-          <IconButton color="primary" onClick={handleSend} disabled={loading || !input.trim()}>
-            <SendIcon />
-          </IconButton>
         </Box>
-      </Card>
-    </Box>
+        
+        <Divider sx={{ mb: 2 }} />
+        
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <TextField
+            fullWidth
+            placeholder="Type a message (e.g., 'What is the occupancy?')"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+            disabled={loading}
+            size="small"
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton color="primary" onClick={handleSend} disabled={!input.trim() || loading}>
+                    <SendIcon />
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
+          />
+        </Box>
+      </Paper>
+    </AdminPageShell>
   );
 }

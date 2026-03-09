@@ -341,13 +341,13 @@ class PaymentSerializer(serializers.ModelSerializer):
         amount_paid = attrs.get('amount_paid')
         month_for = attrs.get('month_for')
         
-        # Validate amount matches unit rent
-        if unit and amount_paid and amount_paid != unit.rent_amount:
-            raise serializers.ValidationError({
-                'amount_paid': f'Amount must match unit rent of {unit.rent_amount}'
-            })
+        # Validate amount matches unit rent (Relaxed: allow flexible payments)
+        # if unit and amount_paid and amount_paid != unit.rent_amount:
+        #     raise serializers.ValidationError({
+        #         'amount_paid': f'Amount must match unit rent of {unit.rent_amount}'
+        #     })
         
-        # Prevent duplicate payment for same month
+        # Prevent duplicate payment for same month (Reduced to warning or keep as is for data integrity)
         if self.instance:
             existing_payment = Payment.objects.filter(
                 unit=unit,

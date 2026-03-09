@@ -13,6 +13,7 @@ import EmptyState from '../../components/common/EmptyState';
 import ErrorState from '../../components/common/ErrorState';
 import AdminPageShell from '../../components/admin/AdminPageShell';
 import adminService from '../../services/adminService';
+import { getApiErrorMessage, parseListResponse } from '../../utils/apiUtils';
 
 const statusColors = { PENDING: 'warning', APPROVED: 'success', REJECTED: 'error' };
 
@@ -30,9 +31,9 @@ export default function PaymentEvidencePage() {
     setLoading(true); setError('');
     try {
       const res = await adminService.getPaymentEvidence();
-      setEvidence(res.data?.results || res.data || []);
+      setEvidence(parseListResponse(res.data));
     } catch (e) {
-      setError(e.response?.data?.message || 'Failed to load');
+      setError(getApiErrorMessage(e, 'Failed to load'));
     } finally { setLoading(false); }
   }, []);
 

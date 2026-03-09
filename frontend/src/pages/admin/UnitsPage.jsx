@@ -1,16 +1,18 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead,
   TableRow, Paper, Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  Snackbar, Alert, Chip, FormControl, InputLabel, Select, MenuItem,
+  Snackbar, Alert, Chip, FormControl, InputLabel, Select, MenuItem, InputAdornment,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import SearchIcon from '@mui/icons-material/Search';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import EmptyState from '../../components/common/EmptyState';
 import ErrorState from '../../components/common/ErrorState';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import AdminPageShell from '../../components/admin/AdminPageShell';
 import adminService from '../../services/adminService';
+import { getApiErrorMessage, parseListResponse } from '../../utils/apiUtils';
 
 const initForm = { property_obj: '', unit_number: '', rent_amount: '' };
 
@@ -19,6 +21,8 @@ export default function UnitsPage() {
   const [properties, setProperties] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [propertyFilter, setPropertyFilter] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(initForm);
@@ -33,36 +37,25 @@ export default function UnitsPage() {
     setLoading(true); setError('');
     try {
       const [u, p] = await Promise.all([adminService.getUnits(), adminService.getProperties()]);
-      const unitsPayload = u.data;
-      const propertiesPayload = p.data;
-
-      const unitsList = Array.isArray(unitsPayload)
-        ? unitsPayload
-        : Array.isArray(unitsPayload?.results)
-        ? unitsPayload.results
-        : Array.isArray(unitsPayload?.units)
-        ? unitsPayload.units
-        : [];
-
-      const propertiesList = Array.isArray(propertiesPayload)
-        ? propertiesPayload
-        : Array.isArray(propertiesPayload?.results)
-        ? propertiesPayload.results
-        : Array.isArray(propertiesPayload?.properties)
-        ? propertiesPayload.properties
-        : [];
-
-      setUnits(unitsList);
-      setProperties(propertiesList);
+      setUnits(parseListResponse(u.data));
+      setProperties(parseListResponse(p.data));
     }
     catch (e) { 
       console.error('Units fetch error:', e);
-      setError(e.response?.data?.message || e.message || 'Failed to load units'); 
+      setError(getApiErrorMessage(e, 'Failed to load units')); 
     }
     finally { setLoading(false); }
   }, []);
 
   useEffect(() => { fetchUnits(); }, [fetchUnits]);
+
+  const filteredUnits = useMemo(() => {
+    return units.filter(u => {
+      const matchesSearch = u.unit_number.toString().toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesProperty = !propertyFilter || u.property_obj === propertyFilter;
+      return matchesSearch && matchesProperty;
+    });
+  }, [units, searchTerm, propertyFilter]);
 
   const openAdd = () => { setEditing(null); setForm(initForm); setFormErrors({}); setDialogOpen(true); };
   const openEdit = (u) => {
@@ -100,7 +93,7 @@ export default function UnitsPage() {
       setDialogOpen(false);
       fetchUnits();
     } catch (e) {
-      setSnack({ open: true, message: e.response?.data?.message || 'Error saving unit', severity: 'error' });
+      setSnack({ open: true, message: getApiErrorMessage(e, 'Error saving unit'), severity: 'error' });
     } finally { setSaving(false); }
   };
 
@@ -112,7 +105,7 @@ export default function UnitsPage() {
       setConfirmOpen(false); setDeleteId(null);
       fetchUnits();
     } catch (e) {
-      setSnack({ open: true, message: e.response?.data?.message || 'Error deleting', severity: 'error' });
+      setSnack({ open: true, message: getApiErrorMessage(e, 'Error deleting'), severity: 'error' });
     } finally { setDeleting(false); }
   };
 
@@ -128,13 +121,43 @@ export default function UnitsPage() {
       error={error}
       onRetry={fetchUnits}
     >
-      {(!Array.isArray(units) || units.length === 0) ? <EmptyState message="No units yet" actionLabel="Add Unit" onAction={openAdd} /> : (
+      <Box sx={{ mb: 3, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+        <TextField
+          size="small"
+          placeholder="Search unit number..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon fontSize="small" color="action" />
+              </InputAdornment>
+            ),
+          }}
+          sx={{ minWidth: 200 }}
+        />
+        <FormControl size="small" sx={{ minWidth: 200 }}>
+          <InputLabel>Filter by Property</InputLabel>
+          <Select
+            value={propertyFilter}
+            label="Filter by Property"
+            onChange={(e) => setPropertyFilter(e.target.value)}
+          >
+            <MenuItem value="">All Properties</MenuItem>
+            {properties.map(p => (
+              <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </Box>
+
+      {filteredUnits.length === 0 ? <EmptyState message={units.length === 0 ? "No units yet" : "No matching units"} actionLabel={units.length === 0 ? "Add Unit" : ""} onAction={units.length === 0 ? openAdd : undefined} /> : (
         <TableContainer component={Paper}>
           <Table>
             <TableHead><TableRow>
               <TableCell>Property</TableCell><TableCell>Unit Number</TableCell><TableCell>Rent Amount</TableCell><TableCell>Occupancy</TableCell><TableCell align="right">Actions</TableCell>
             </TableRow></TableHead>
-            <TableBody>{units.map((u) => (
+            <TableBody>{filteredUnits.map((u) => (
               <TableRow key={u.id}>
                 <TableCell>{propertyNameById(u.property_obj) || u.property_name || '—'}</TableCell>
                 <TableCell>{u.unit_number}</TableCell>

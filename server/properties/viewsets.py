@@ -63,8 +63,46 @@ class MessageViewSet(viewsets.ModelViewSet):
             ).select_related('sender', 'receiver')
     
     def perform_create(self, serializer):
-        """Set sender from request user"""
-        serializer.save(sender=self.request.user)
+        # Set sender as the current user
+        message = serializer.save(sender=self.request.user)
+        
+        # Check if this is a message to the "Chatbot" (no receiver or specifically addressed)
+        # For simplicity, if receiver is the admin or null, we can check a flag or just the subject
+        if (message.receiver and message.receiver.role == 'ADMIN' and 
+            (message.subject == 'Chatbot' or 'bot' in message.body.lower())):
+            self._handle_chatbot_reply(message)
+
+    def _handle_chatbot_reply(self, message):
+        """Simple rule-based chatbot for basic property stats"""
+        from .services import ReportService
+        body = message.body.lower()
+        reply_text = "I'm sorry, I don't understand that request. Try asking about 'occupancy' or 'revenue'."
+        
+        if 'occupancy' in body or 'units' in body:
+            from .models import Unit
+            total = Unit.objects.count()
+            occupied = Unit.objects.filter(is_occupied=True).count()
+            rate = (occupied / total * 100) if total > 0 else 0
+            reply_text = f"The current occupancy rate is {rate:.1f}%. Out of {total} units, {occupied} are occupied."
+        
+        elif 'revenue' in body or 'income' in body or 'stats' in body:
+            stats = ReportService.get_admin_payment_stats()
+            reply_text = f"Total revenue collected: KES {stats['total_income']:,}. There are {stats['pending_count']} pending payments."
+
+        elif 'hello' in body or 'hi' in body:
+            reply_text = "Hello! I am your Property Pulse assistant. How can I help you today?"
+
+        # Create automated reply from Admin
+        from .models import User, Message
+        # Find the first admin to "send" the message
+        admin = User.objects.filter(role='ADMIN').first()
+        if admin:
+            Message.objects.create(
+                sender=admin,
+                receiver=message.sender,
+                subject="Chatbot Reply",
+                body=reply_text
+            )
     
     @action(detail=False, methods=['get'])
     def conversations(self, request):

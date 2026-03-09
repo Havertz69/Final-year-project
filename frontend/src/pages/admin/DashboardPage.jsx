@@ -1,17 +1,24 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Card, CardContent, Typography, Box, Grid, Skeleton, Paper, Divider, Chip, List, ListItem, ListItemText, ListItemAvatar, Avatar } from '@mui/material';
-import HomeIcon from '@mui/icons-material/Home';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import CancelIcon from '@mui/icons-material/Cancel';
-import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
-import PeopleIcon from '@mui/icons-material/People';
-import TrendingUpIcon from '@mui/icons-material/TrendingUp';
-import BuildIcon from '@mui/icons-material/Build';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  Grid, Paper, Typography, Box, Table, TableBody, TableCell, TableContainer,
+  TableHead, TableRow, Chip, Button, IconButton, Tooltip, Card, CardContent, Skeleton, Avatar, List, ListItem, ListItemText, ListItemAvatar
+} from '@mui/material';
+import {
+  TrendingUp, People, Home, Receipt, ArrowForward, 
+  Notifications as NotificationsIcon, CheckCircle, Home as HomeIcon, CheckCircle as CheckCircleIcon, 
+  Cancel as CancelIcon, People as PeopleIcon, AttachMoney as AttachMoneyIcon, Build as BuildIcon
+} from '@mui/icons-material';
+import { Link } from 'react-router-dom';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip, 
+  ResponsiveContainer, Cell, PieChart, Pie, LineChart, Line, Tooltip as ReTooltip
+} from 'recharts';
+import AdminPageShell from '../../components/admin/AdminPageShell';
+import LoadingSpinner from '../../components/common/LoadingSpinner';
 import ErrorState from '../../components/common/ErrorState';
 import EmptyState from '../../components/common/EmptyState';
-import AdminPageShell from '../../components/admin/AdminPageShell';
 import adminService from '../../services/adminService';
-import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip as ReTooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from 'recharts';
+import { getApiErrorMessage, parseListResponse } from '../../utils/apiUtils';
 
 const KPI_CARDS = [
   { key: 'total_units', label: 'Total Units', icon: <HomeIcon />, color: '#2563eb' },
@@ -31,40 +38,50 @@ const priorityColors = {
 };
 
 export default function DashboardPage() {
-  const [data, setData] = useState(null);
-  const [trends, setTrends] = useState([]);
-  const [maintenance, setMaintenance] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [recentPayments, setRecentPayments] = useState([]);
+  const [pendingMaintenance, setPendingMaintenance] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError('');
+  const fetchDashboardData = useCallback(async () => {
+    setLoading(true); setError('');
     try {
-      const [dashRes, trendsRes, maintRes] = await Promise.all([
+      const [sRes, pRes, mRes] = await Promise.all([
         adminService.getDashboard(),
-        adminService.getRevenueTrends(6),
-        adminService.getMaintenance(),
+        adminService.getPayments(),
+        adminService.getMaintenance()
       ]);
-      setData(dashRes.data);
-      setTrends(trendsRes.data.trends || []);
-      setMaintenance(Array.isArray(maintRes.data) ? maintRes.data.slice(0, 5) : []);
+      
+      setStats(sRes.data);
+      setRecentPayments(parseListResponse(pRes.data).slice(0, 5));
+      setPendingMaintenance(
+        parseListResponse(mRes.data)
+          .filter(m => m.status === 'PENDING')
+          .slice(0, 5)
+      );
     } catch (e) {
-      console.error('Dashboard fetch error:', e);
-      setError(e.response?.data?.message || e.message || 'Failed to load dashboard');
+      console.error('Dashboard error:', e);
+      setError(getApiErrorMessage(e, 'Failed to load dashboard data'));
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { fetchDashboardData(); }, [fetchDashboardData]);
 
-  if (error) return <ErrorState message={error} onRetry={fetchData} />;
-  if (!loading && !data) return <EmptyState message="No dashboard data available" />;
+  if (loading) return <LoadingSpinner />;
+  if (error) return <ErrorState message={error} onRetry={fetchDashboardData} />;
+  if (!stats) return <EmptyState message="No dashboard data available" />;
 
-  const isSmart = data?.role === 'ADMIN' && !!data?.property_stats;
-  const propertyStats = isSmart ? data.property_stats : data;
-  const paymentStats = isSmart ? data.payment_stats : null;
+  const isSmart = stats?.role === 'ADMIN' && !!stats?.property_stats;
+  const propertyStats = isSmart ? stats.property_stats : (stats || {});
+  const paymentStats = isSmart ? stats.payment_stats : null;
+  
+  // Use state variables for lists to ensure they are always arrays
+  const trendsData = (isSmart ? stats.revenue_trends : []) || [];
+  const maintenanceList = pendingMaintenance || [];
+  const paymentsList = recentPayments || [];
 
   const occupancyPie = [
     { name: 'Occupied', value: Number(propertyStats?.occupied_units ?? 0) },
@@ -76,7 +93,7 @@ export default function DashboardPage() {
       title="Admin Dashboard"
       subtitle="Overview of your property portfolio performance."
       loading={loading}
-      onRetry={fetchData}
+      onRetry={fetchDashboardData}
     >
       <Grid container spacing={3} sx={{ mb: 4 }}>
         {KPI_CARDS.map((k) => (
@@ -119,7 +136,7 @@ export default function DashboardPage() {
               </Box>
               <Box sx={{ height: 350, mt: 2 }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={trends}>
+                  <LineChart data={trendsData}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
                     <XAxis dataKey="period" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#666' }} />
                     <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#666' }} />
@@ -191,10 +208,10 @@ export default function DashboardPage() {
             <CardContent>
               <Typography variant="h6" fontWeight={800} gutterBottom>Recent Maintenance</Typography>
               <List sx={{ pt: 0 }}>
-                {maintenance.length === 0 ? (
+                {maintenanceList.length === 0 ? (
                   <Typography variant="body2" color="text.secondary">No recent requests.</Typography>
                 ) : (
-                  maintenance.map((m) => {
+                  maintenanceList.map((m) => {
                     const priority = priorityColors[m.priority] || priorityColors.MEDIUM;
                     return (
                       <ListItem key={m.id} disableGutters divider sx={{ py: 1.5 }}>

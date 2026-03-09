@@ -1,16 +1,18 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead,
   TableRow, Paper, Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  Snackbar, Alert, MenuItem, Select, InputLabel, FormControl,
+  Snackbar, Alert, MenuItem, Select, InputLabel, FormControl, InputAdornment,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import SearchIcon from '@mui/icons-material/Search';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import EmptyState from '../../components/common/EmptyState';
 import ErrorState from '../../components/common/ErrorState';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import AdminPageShell from '../../components/admin/AdminPageShell';
 import adminService from '../../services/adminService';
+import { getApiErrorMessage, parseListResponse } from '../../utils/apiUtils';
 
 const initForm = { user_email: '', unit_id: '', move_in_date: '', lease_end_date: '' };
 
@@ -19,6 +21,7 @@ export default function TenantsPage() {
   const [units, setUnits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState(initForm);
   const [formErrors, setFormErrors] = useState({});
@@ -28,50 +31,27 @@ export default function TenantsPage() {
   const [deleting, setDeleting] = useState(false);
   const [snack, setSnack] = useState({ open: false, message: '', severity: 'success' });
 
-  const getApiErrorMessage = (e, fallback) => {
-    const data = e?.response?.data;
-    if (!data) return fallback;
-    if (typeof data === 'string') return data;
-    if (data.message) return data.message;
-    if (data.error) return data.error;
-    try {
-      const firstKey = Object.keys(data)[0];
-      const val = data[firstKey];
-      if (Array.isArray(val)) return val[0];
-      if (typeof val === 'string') return val;
-    } catch {
-      // ignore
-    }
-    return fallback;
-  };
-
   const fetchData = useCallback(async () => {
     setLoading(true); setError('');
     try {
       const [t, u] = await Promise.all([adminService.getTenants(), adminService.getUnits()]);
-      const tenantsPayload = t.data;
-      const unitsPayload = u.data;
-      const tenantsList = Array.isArray(tenantsPayload)
-        ? tenantsPayload
-        : Array.isArray(tenantsPayload?.results)
-        ? tenantsPayload.results
-        : Array.isArray(tenantsPayload?.tenants)
-        ? tenantsPayload.tenants
-        : [];
-      const unitsList = Array.isArray(unitsPayload)
-        ? unitsPayload
-        : Array.isArray(unitsPayload?.results)
-        ? unitsPayload.results
-        : Array.isArray(unitsPayload?.units)
-        ? unitsPayload.units
-        : [];
-      setTenants(tenantsList);
-      setUnits(unitsList);
+      setTenants(parseListResponse(t.data));
+      setUnits(parseListResponse(u.data));
     } catch (e) { setError(getApiErrorMessage(e, 'Failed to load')); }
     finally { setLoading(false); }
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  const filteredTenants = useMemo(() => {
+    if (!searchTerm) return tenants;
+    const t = searchTerm.toLowerCase();
+    return tenants.filter(tenant => 
+      (tenant.user_full_name || '').toLowerCase().includes(t) ||
+      (tenant.user_email || '').toLowerCase().includes(t) ||
+      (tenant.unit_number || '').toLowerCase().includes(t)
+    );
+  }, [tenants, searchTerm]);
 
   const availableUnits = units.filter((u) => !u.is_occupied);
 
@@ -94,7 +74,7 @@ export default function TenantsPage() {
     if (!validate()) return;
     setSaving(true);
     try {
-      await adminService.assignTenantToUnit({
+      await adminService.assignTenant({
         user_email: form.user_email,
         unit_id: Number(form.unit_id),
         move_in_date: form.move_in_date,
@@ -112,7 +92,7 @@ export default function TenantsPage() {
   const handleDelete = async () => {
     setDeleting(true);
     try {
-      await adminService.unassignTenantFromUnit(deleteId);
+      await adminService.unassignTenant(deleteId);
       setSnack({ open: true, message: 'Tenant unassigned', severity: 'success' });
       setConfirmOpen(false);
       fetchData();
@@ -134,13 +114,30 @@ export default function TenantsPage() {
       error={error}
       onRetry={fetchData}
     >
-      {tenants.length === 0 ? <EmptyState message="No tenants yet" /> : (
+      <Box sx={{ mb: 3 }}>
+        <TextField
+          size="small"
+          placeholder="Search name, email or unit..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon fontSize="small" color="action" />
+              </InputAdornment>
+            ),
+          }}
+          sx={{ minWidth: 250 }}
+        />
+      </Box>
+
+      {filteredTenants.length === 0 ? <EmptyState message={tenants.length === 0 ? "No tenants yet" : "No matching tenants"} /> : (
         <TableContainer component={Paper}>
           <Table>
             <TableHead><TableRow>
               <TableCell>Name</TableCell><TableCell>Email</TableCell><TableCell>Unit</TableCell><TableCell>Move-in Date</TableCell><TableCell align="right">Actions</TableCell>
             </TableRow></TableHead>
-            <TableBody>{tenants.map((t) => (
+            <TableBody>{filteredTenants.map((t) => (
               <TableRow key={t.id}>
                 <TableCell>{t.user_full_name}</TableCell>
                 <TableCell>{t.user_email}</TableCell>
