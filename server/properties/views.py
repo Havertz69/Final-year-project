@@ -471,11 +471,16 @@ def download_payment_receipt(request, pk):
     Generate and download a PDF receipt for a specific payment.
     Tenants can only download their own. Admins can download any.
     """
-    import io
-    from django.http import HttpResponse
-    from reportlab.lib.pagesizes import letter
-    from reportlab.pdfgen import canvas
-    
+    try:
+        import io
+        from django.http import FileResponse
+        from reportlab.lib.pagesizes import letter
+        from reportlab.pdfgen import canvas
+    except ImportError:
+        return Response({
+            'error': 'PDF generation library (reportlab) is not installed on the server. Please run "pip install reportlab" and restart the server.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     # 1. Fetch Payment securely
     if request.user.role == 'TENANT':
         try:
@@ -530,11 +535,8 @@ def download_payment_receipt(request, pk):
     
     # 3. Return as attachment
     buffer.seek(0)
-    response = HttpResponse(buffer, content_type='application/pdf')
     filename = f"Receipt_{payment.month_for.strftime('%b-%Y')}_{payment.unit.unit_number}.pdf"
-    response['Content-Disposition'] = f'attachment; filename="{filename}"'
-    
-    return response
+    return FileResponse(buffer, as_attachment=True, filename=filename)
 
 
 # ==================== MAINTENANCE REQUEST VIEWS ====================
@@ -1052,10 +1054,15 @@ def export_report_pdf(request):
     """
     Export monthly report as PDF for admin
     """
-    import io
-    from django.http import HttpResponse
-    from reportlab.lib.pagesizes import letter
-    from reportlab.pdfgen import canvas
+    try:
+        import io
+        from django.http import FileResponse
+        from reportlab.lib.pagesizes import letter
+        from reportlab.pdfgen import canvas
+    except ImportError:
+        return Response({
+            'error': 'PDF generation library (reportlab) is not installed on the server. Please run "pip install reportlab" and restart the server.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     year = request.query_params.get('year', date.today().year)
     month = request.query_params.get('month', date.today().month)
@@ -1113,11 +1120,8 @@ def export_report_pdf(request):
     p.save()
     
     buffer.seek(0)
-    response = HttpResponse(buffer, content_type='application/pdf')
     filename = f"Property_Report_{year}_{month:02d}.pdf"
-    response['Content-Disposition'] = f'attachment; filename="{filename}"'
-    
-    return response
+    return FileResponse(buffer, as_attachment=True, filename=filename)
 
 
 @api_view(['GET'])
@@ -1164,7 +1168,7 @@ def dashboard_summary(request):
                     'id': n.id,
                     'title': n.title,
                     'message': n.message,
-                    'created_at': n.created_at,
+                    'created_at': n.created_at.isoformat(),
                     'is_read': n.is_read
                 } for n in recent_notifications
             ]

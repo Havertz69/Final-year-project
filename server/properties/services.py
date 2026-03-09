@@ -342,18 +342,32 @@ class ReportService:
     @staticmethod
     def get_revenue_trends(months=12):
         """Return monthly revenue for the last N months (newest last)."""
-        from dateutil.relativedelta import relativedelta
         today = date.today()
         trends = []
+        
+        # Calculate start month without relativedelta
+        curr_month = today.month
+        curr_year = today.year
+        
         for i in range(months - 1, -1, -1):
-            period_date = (today.replace(day=1) - relativedelta(months=i))
+            # Calculate target year and month
+            target_month = curr_month - i
+            target_year = curr_year
+            
+            while target_month <= 0:
+                target_month += 12
+                target_year -= 1
+                
+            period_date = date(target_year, target_month, 1)
+            
             qs = Payment.objects.filter(
-                month_for__year=period_date.year,
-                month_for__month=period_date.month,
+                month_for__year=target_year,
+                month_for__month=target_month,
             )
             total = qs.filter(status='PAID').aggregate(
                 total=models.Sum('amount_paid')
             )['total'] or 0
+            
             trends.append({
                 'month': period_date.strftime('%b %Y'),
                 'period': period_date.strftime('%b %Y'), # for compatibility
