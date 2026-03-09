@@ -603,7 +603,19 @@ def create_message_notification(sender, instance, created, **kwargs):
 
 @receiver(post_save, sender=Payment)
 def create_payment_notification(sender, instance, created, **kwargs):
-    """Create notification when payment status changes"""
+    """Create notification when payment status changes or is created"""
+    if created and instance.status == 'PENDING':
+        # Notify all admins about the new payment
+        admins = User.objects.filter(role='ADMIN')
+        for admin in admins:
+            Notification.create_notification(
+                user=admin,
+                title="New Payment Submission",
+                message=f"Tenant {instance.tenant.user.full_name} has submitted a payment of KES {instance.amount_paid} for {instance.month_for.strftime('%B %Y')}.",
+                notification_type='SYSTEM_ANNOUNCEMENT',
+                related_payment=instance
+            )
+            
     if instance.status == 'OVERDUE':
         Notification.create_notification(
             user=instance.tenant.user,

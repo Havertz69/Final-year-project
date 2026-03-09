@@ -1139,6 +1139,9 @@ def dashboard_summary(request):
         # Payment stats
         payment_stats = PaymentService.get_admin_payment_stats()
         
+        # Revenue trends
+        revenue_trends = ReportService.get_revenue_trends(months=6)
+        
         # Recent notifications
         recent_notifications = Notification.objects.filter(
             user=user
@@ -1155,6 +1158,7 @@ def dashboard_summary(request):
                 'occupancy_rate': round((occupied_units / total_units * 100) if total_units > 0 else 0, 2)
             },
             'payment_stats': payment_stats,
+            'revenue_trends': revenue_trends,
             'recent_notifications': [
                 {
                     'id': n.id,

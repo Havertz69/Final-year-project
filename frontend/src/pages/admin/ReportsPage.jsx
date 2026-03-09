@@ -39,8 +39,8 @@ export default function ReportsPage() {
         adminService.getRevenueTrends(12),
         adminService.getProperties()
       ]);
-      setReportData(rRes.data);
-      setTrends(parseListResponse(tRes.data));
+      setReportData(rRes.data.report);
+      setTrends(parseListResponse(tRes.data.trends || tRes.data));
       setProperties(parseListResponse(pRes.data));
     } catch (e) {
       setError(getApiErrorMessage(e, 'Failed to generate report'));

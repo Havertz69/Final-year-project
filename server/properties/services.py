@@ -356,7 +356,9 @@ class ReportService:
             )['total'] or 0
             trends.append({
                 'month': period_date.strftime('%b %Y'),
+                'period': period_date.strftime('%b %Y'), # for compatibility
                 'revenue': float(total),
+                'total_income': float(total), # for compatibility
                 'paid_count': qs.filter(status='PAID').count(),
                 'pending_count': qs.filter(status='PENDING').count(),
                 'overdue_count': qs.filter(status='OVERDUE').count(),
