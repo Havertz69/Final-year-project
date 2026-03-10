@@ -1,8 +1,11 @@
+import logging
 from decimal import Decimal, InvalidOperation
 from rest_framework import generics, status, permissions, filters
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from django.contrib.auth import get_user_model
+
+logger = logging.getLogger(__name__)
 from django.shortcuts import get_object_or_404
 from django.db.models import Sum, Count, Q, F
 from django.utils import timezone
@@ -1125,124 +1128,49 @@ def export_report_pdf(request):
 
 
 @api_view(['GET'])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([AdminOnly])
 def dashboard_summary(request):
     """
-    Get comprehensive dashboard summary for both admin and tenant
+    Returns a comprehensive dashboard summary for the admin portal.
+    Replaces the legacy redirect with a direct data response matching the frontend's "Smart" expectations.
     """
-    user = request.user
+    # 1. Property Stats
+    total_units = Unit.objects.count()
+    occupied_units = Unit.objects.filter(is_occupied=True).count()
+    vacant_units = total_units - occupied_units
+    total_tenants = TenantProfile.objects.count()
     
-    if user.role == 'ADMIN':
-        # Admin dashboard
-        total_properties = Property.objects.count()
-        total_units = Unit.objects.count()
-        occupied_units = Unit.objects.filter(is_occupied=True).count()
-        vacant_units = total_units - occupied_units
-        total_tenants = TenantProfile.objects.count()
-        
-        # Payment stats
-        payment_stats = PaymentService.get_admin_payment_stats()
-        
-        # Revenue trends
-        revenue_trends = ReportService.get_revenue_trends(months=6)
-        
-        # Recent notifications
-        recent_notifications = Notification.objects.filter(
-            user=user
-        ).order_by('-created_at')[:5]
-        
-        return Response({
-            'role': 'ADMIN',
-            'property_stats': {
-                'total_properties': total_properties,
-                'total_units': total_units,
-                'occupied_units': occupied_units,
-                'vacant_units': vacant_units,
-                'total_tenants': total_tenants,
-                'occupancy_rate': round((occupied_units / total_units * 100) if total_units > 0 else 0, 2)
-            },
-            'payment_stats': payment_stats,
-            'revenue_trends': revenue_trends,
-            'recent_notifications': [
-                {
-                    'id': n.id,
-                    'title': n.title,
-                    'message': n.message,
-                    'created_at': n.created_at.isoformat(),
-                    'is_read': n.is_read
-                } for n in recent_notifications
-            ]
-        })
+    property_stats = {
+        'total_units': total_units,
+        'occupied_units': occupied_units,
+        'vacant_units': vacant_units,
+        'total_tenants': total_tenants,
+        'total_properties': Property.objects.count(),
+        'occupancy_rate': round((occupied_units / total_units * 100) if total_units > 0 else 0, 2)
+    }
+
+    # 2. Payment Stats (Current Month)
+    today = date.today()
+    report = ReportService.generate_monthly_report(today.year, today.month)
     
-    else:
-        # Tenant dashboard
-        try:
-            tenant_profile = TenantProfile.objects.get(user=user)
-            payment_summary = PaymentService.get_tenant_payment_summary(tenant_profile)
-            
-            # Days remaining in lease
-            days_remaining = None
-            if tenant_profile.lease_end_date:
-                days_remaining = max(0, (tenant_profile.lease_end_date - date.today()).days)
+    payment_stats = {
+        'total_income': report['total_revenue'],
+        'expected_income': report['expected_revenue'],
+        'paid_count': report['paid_count'],
+        'pending_count': report['pending_count'],
+        'overdue_count': report['overdue_count'],
+        'collection_rate': report['collection_rate']
+    }
 
-            # Next due date (first of next month if current not paid)
-            next_due_date = None
-            current_month = date.today().replace(day=1)
-            current_payment = Payment.objects.filter(
-                tenant=tenant_profile,
-                month_for=current_month
-            ).first()
-            if not current_payment or current_payment.status != 'PAID':
-                next_due_date = current_month
+    # 3. Revenue Trends (Last 6 months)
+    revenue_trends_data = ReportService.get_revenue_trends(months=6)
 
-            # Unread notifications count
-            unread_notifications = Notification.objects.filter(
-                user=user,
-                is_read=False
-            ).count()
-
-            # Recent notifications
-            recent_notifications = Notification.objects.filter(
-                user=user
-            ).order_by('-created_at')[:5]
-            
-            # Unit info
-            unit_info = None
-            if tenant_profile.assigned_unit:
-                unit_info = {
-                    'unit_number': tenant_profile.assigned_unit.unit_number,
-                    'property_name': tenant_profile.assigned_unit.property_obj.name,
-                    'rent_amount': tenant_profile.assigned_unit.rent_amount
-                }
-            
-            return Response({
-                'role': 'TENANT',
-                'unit_info': unit_info,
-                'payment_summary': {
-                    'current_month': payment_summary['current_month'],
-                    'overdue_count': payment_summary['overdue_count'],
-                    'overdue_amount': payment_summary['overdue_amount'],
-                    'total_paid': payment_summary['total_paid']
-                },
-                'outstanding_balance': payment_summary['overdue_amount'],
-                'next_due_date': next_due_date.isoformat() if next_due_date else None,
-                'days_remaining': days_remaining,
-                'unread_notifications': unread_notifications,
-                'recent_notifications': [
-                    {
-                        'id': n.id,
-                        'title': n.title,
-                        'message': n.message,
-                        'created_at': n.created_at,
-                        'is_read': n.is_read
-                    } for n in recent_notifications
-                ]
-            })
-            
-        except TenantProfile.DoesNotExist:
-            return Response({
-                'error': 'Tenant profile not found'
-            }, status=status.HTTP_404_NOT_FOUND)
+    return Response({
+        'role': 'ADMIN',
+        'property_stats': property_stats,
+        'payment_stats': payment_stats,
+        'revenue_trends': revenue_trends_data
+    })
 
 
 @api_view(['GET'])
@@ -1258,7 +1186,8 @@ def system_health_check(request):
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
             db_status = "healthy"
-    except:
+    except Exception as e:
+        logger.error(f"Database health check failed: {e}")
         db_status = "unhealthy"
     
     # Check for overdue payments
@@ -1405,66 +1334,54 @@ def tenant_pay_payment(request):
 @permission_classes([TenantOnly])
 def tenant_submit_payment(request):
     """
-    Submit a manual payment (with optional evidence)
+    Submit a manual payment (with optional evidence).
     """
-    print(">>> tenant_submit_payment hit")
+    logger.debug("tenant_submit_payment: request received from user %s", request.user.id)
     try:
         profile = TenantProfile.objects.get(user=request.user)
-        print(">>> Profile fetched:", profile)
-        
+
         raw_amount = request.data.get('amount_paid')
         try:
             amount_paid = Decimal(str(raw_amount))
         except (TypeError, ValueError, InvalidOperation):
             return Response({'error': 'Invalid amount format'}, status=status.HTTP_400_BAD_REQUEST)
+
         month_for = request.data.get('month_for')
         payment_method = request.data.get('payment_method', 'BANK_TRANSFER')
         transaction_reference = request.data.get('transaction_reference', '')
         evidence_file = request.FILES.get('evidence')
 
-        print(f">>> Payload data: amount_paid={amount_paid}, month_for={month_for}, method={payment_method}, ref={transaction_reference}")
-
         if not amount_paid or not month_for:
-            print(">>> Missing amount or month")
             return Response({'error': 'Amount and Month are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Parse month_for date
+        # Parse and normalise month_for to the first of the month
         try:
-            month_date = timezone.datetime.strptime(month_for, '%Y-%m-%d').date()
-            # Normalize to first of the month
-            month_date = month_date.replace(day=1)
-            print(">>> Parsed month_date:", month_date)
+            month_date = timezone.datetime.strptime(month_for, '%Y-%m-%d').date().replace(day=1)
         except ValueError:
-            print(">>> ValueError parsing date")
             return Response({'error': 'Invalid date format. Use YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Check if payment for this month already exists
-        existing_payment = Payment.objects.filter(
-            tenant=profile,
-            month_for=month_date
-        ).first()
+        # Check if a payment for this month already exists
+        existing_payment = Payment.objects.filter(tenant=profile, month_for=month_date).first()
 
         if existing_payment:
-            print(">>> Existing payment found:", existing_payment.id)
             if existing_payment.status == 'PAID':
-                print(">>> Existent is PAID. Halting.")
-                return Response({'error': f'Payment for {month_date.strftime("%B %Y")} has already been confirmed.'}, status=status.HTTP_400_BAD_REQUEST)
-            else:
-                # Update existing pending/overdue payment
-                print(">>> Updating existing payment")
-                payment = existing_payment
-                payment.amount_paid = amount_paid
-                payment.payment_method = payment_method
-                payment.transaction_reference = transaction_reference
-                payment.payment_date = timezone.now().date()
-                payment.status = 'PENDING'
-                payment.save()
+                return Response(
+                    {'error': f'Payment for {month_date.strftime("%B %Y")} has already been confirmed.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            # Update existing pending/overdue payment
+            payment = existing_payment
+            payment.amount_paid = amount_paid
+            payment.payment_method = payment_method
+            payment.transaction_reference = transaction_reference
+            payment.payment_date = timezone.now().date()
+            payment.status = 'PENDING'
+            payment.save()
+            logger.info("Payment %s updated by tenant %s", payment.id, request.user.id)
         else:
-            print(">>> No existing payment. Creating one.")
             if not profile.assigned_unit:
-                print(">>> Profile has no assigned unit")
                 return Response({'error': 'No unit assigned to your profile.'}, status=status.HTTP_400_BAD_REQUEST)
-                
+
             payment = Payment.objects.create(
                 tenant=profile,
                 unit=profile.assigned_unit,
@@ -1475,18 +1392,16 @@ def tenant_submit_payment(request):
                 transaction_reference=transaction_reference,
                 status='PENDING'
             )
-            print(">>> Payment created:", payment.id)
+            logger.info("Payment %s created by tenant %s", payment.id, request.user.id)
 
-        # Attach evidence if provided
+        # Attach evidence file if provided
         if evidence_file:
-            print(">>> Attaching evidence")
             PaymentEvidence.objects.create(
                 payment=payment,
                 uploaded_by=request.user,
                 file=evidence_file,
                 status='PENDING'
             )
-            print(">>> Evidence attached")
 
         return Response({
             'message': 'Payment submitted successfully',
@@ -1494,10 +1409,8 @@ def tenant_submit_payment(request):
         }, status=status.HTTP_201_CREATED)
 
     except TenantProfile.DoesNotExist:
-        print(">>> Tenant profile not found!")
         return Response({'error': 'Tenant profile not found'}, status=status.HTTP_404_NOT_FOUND)
     except ValidationError as e:
-        # Django model ValidationError
         error_messages = []
         if hasattr(e, 'message_dict'):
             for field, messages in e.message_dict.items():
@@ -1506,15 +1419,11 @@ def tenant_submit_payment(request):
             error_messages = e.messages
         else:
             error_messages = [str(e)]
-        
-        err_msg = " ".join(error_messages)
-        print(">>> Validation Error:", err_msg)
-        return Response({'error': err_msg}, status=status.HTTP_400_BAD_REQUEST)
+        logger.warning("Validation error in tenant_submit_payment: %s", error_messages)
+        return Response({'error': ' '.join(error_messages)}, status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
-        import traceback
-        print(">>> EXCEPTION IN tenant_submit_payment:")
-        traceback.print_exc()
-        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        logger.exception("Unexpected error in tenant_submit_payment for user %s", request.user.id)
+        return Response({'error': 'An unexpected error occurred. Please try again.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class TenantLeaseView(generics.RetrieveAPIView):
     permission_classes = [TenantOnly]

@@ -33,34 +33,23 @@ class UserLoginSerializer(serializers.Serializer):
     def validate(self, attrs):
         email = attrs.get('email')
         password = attrs.get('password')
-        
-        if email and password:
-            user = authenticate(
-                request=self.context.get('request'),
-                username=email,  # Use email as username
-                password=password
-            )
-            
-            if not user:
-                # Try getting user directly to check if they exist
-                from django.contrib.auth import get_user_model
-                User = get_user_model()
-                try:
-                    user_obj = User.objects.get(email=email)
-                    if not user_obj.is_active:
-                        raise serializers.ValidationError('User account is disabled.')
-                    else:
-                        raise serializers.ValidationError('Invalid password.')
-                except User.DoesNotExist:
-                    raise serializers.ValidationError('User with this email does not exist.')
-            
-            if not user.is_active:
-                raise serializers.ValidationError('User account is disabled.')
-            
-            attrs['user'] = user
-            return attrs
-        else:
+
+        if not email or not password:
             raise serializers.ValidationError('Must include email and password.')
+
+        user = authenticate(
+            request=self.context.get('request'),
+            username=email,
+            password=password
+        )
+
+        # Use a single generic message for all failures — prevents user enumeration.
+        # An attacker must not be able to distinguish "email not found" from "wrong password".
+        if not user or not user.is_active:
+            raise serializers.ValidationError('Invalid email or password.')
+
+        attrs['user'] = user
+        return attrs
 
 
 class UserProfileSerializer(serializers.ModelSerializer):

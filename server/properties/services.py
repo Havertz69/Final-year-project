@@ -260,26 +260,29 @@ class ReportService:
     @staticmethod
     def generate_monthly_report(year, month):
         """Generate monthly financial report"""
-        from .models import Unit
+        from .models import Unit, TenantProfile
+        
+        # Occupancy stats
+        total_units = Unit.objects.count()
+        occupied_units_qs = Unit.objects.filter(is_occupied=True)
+        occupied_units = occupied_units_qs.count()
+        vacant_units = total_units - occupied_units
+        occupancy_rate = round((occupied_units / total_units * 100) if total_units > 0 else 0, 2)
+        
+        # Calculate expected revenue based on all occupied units' rent
+        expected_revenue = occupied_units_qs.aggregate(
+            total=models.Sum('rent_amount')
+        )['total'] or 0
+        
         payments = Payment.objects.filter(month_for__year=year, month_for__month=month)
         
         total_revenue = payments.filter(status='PAID').aggregate(
             total=models.Sum('amount_paid')
         )['total'] or 0
         
-        expected_revenue = payments.aggregate(
-            total=models.Sum('amount_paid')
-        )['total'] or 0
-        
         total_pending = payments.filter(status__in=['PENDING', 'OVERDUE']).aggregate(
             total=models.Sum('amount_paid')
         )['total'] or 0
-
-        # Occupancy stats
-        total_units = Unit.objects.count()
-        occupied_units = Unit.objects.filter(is_occupied=True).count()
-        vacant_units = total_units - occupied_units
-        occupancy_rate = round((occupied_units / total_units * 100) if total_units > 0 else 0, 2)
 
         return {
             'period': f"{year}-{month:02d}",
@@ -289,6 +292,7 @@ class ReportService:
             'paid_count': payments.filter(status='PAID').count(),
             'pending_count': payments.filter(status='PENDING').count(),
             'overdue_count': payments.filter(status='OVERDUE').count(),
+            'total_tenants': TenantProfile.objects.count(),
             'collection_rate': round(
                 (payments.filter(status='PAID').count() / payments.count() * 100) 
                 if payments.count() > 0 else 0, 2

@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Django
+*.log
+db.sqlite3
+server/media/
+server/staticfiles/
+server/.env
+
+# Node
+node_modules/
+frontend/dist/
+frontend/dist-ssr/
+
+# Environment files (never commit secrets)
+.env
+.env.local
+.env.production
+*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+
+# Debug/temp scripts (should never be committed)
+server/repro_*.py
+server/debug_*.py
+server/check_*.py
+server/test_login_*.py
+server/test_auth.py
+server/test_decimal.py
+server/apply_*.py
+server/*.txt
+!server/requirements.txt

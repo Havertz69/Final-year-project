@@ -1,0 +1,51 @@
+# Environment variables - NEVER commit these
+.env
+.env.local
+.env.production
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Media and static files (user uploads, collected static)
+media/
+staticfiles/
+
+# Distribution / packaging
+.Python
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Debug/test scripts (one-off debugging files)
+repro_*.py
+debug_*.py
+check_*.py
+apply_*.py
+test_login_*.py
+test_auth.py
+test_decimal.py
+*.txt.bak

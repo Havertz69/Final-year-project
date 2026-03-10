@@ -1,7 +1,25 @@
+# Core Django
 Django==4.2.7
 djangorestframework==3.14.0
-psycopg2-binary==2.9.7
 djangorestframework-simplejwt==5.3.0
+
+# Database
+psycopg2-binary==2.9.7
+
+# CORS
 django-cors-headers==4.3.1
+
+# Environment variables
 python-dotenv==1.0.0
+
+# Image handling — required for ImageField in models
+Pillow==10.2.0
+
+# PDF generation — required for receipt and report export
 reportlab==4.0.7
+
+# Rate limiting — protects auth endpoints from brute-force
+django-ratelimit==4.1.0
+
+# Filtering — used in list views
+django-filter==23.3

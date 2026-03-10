@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from django.core.exceptions import ValidationError
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from .validators import validate_upload
 
 User = get_user_model()
 
@@ -205,7 +206,8 @@ class MaintenanceRequest(models.Model):
         upload_to='maintenance_images/%Y/%m/',
         blank=True,
         null=True,
-        help_text="Optional image for the maintenance request"
+        validators=[validate_upload],
+        help_text="Optional image for the maintenance request (JPEG/PNG/WebP, max 5MB)"
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='MEDIUM')
@@ -398,7 +400,8 @@ class PaymentEvidence(models.Model):
     )
     file = models.FileField(
         upload_to='payment_evidence/%Y/%m/',
-        help_text="Payment screenshot or document"
+        validators=[validate_upload],
+        help_text="Payment screenshot or document (JPEG/PNG/WebP/PDF, max 5MB)"
     )
     status = models.CharField(
         max_length=20,
@@ -615,15 +618,22 @@ def create_payment_notification(sender, instance, created, **kwargs):
                 notification_type='SYSTEM_ANNOUNCEMENT',
                 related_payment=instance
             )
-            
+
     if instance.status == 'OVERDUE':
-        Notification.create_notification(
+        # Only create ONE overdue notification per payment — avoid spamming tenant
+        already_notified = Notification.objects.filter(
             user=instance.tenant.user,
-            title="Rent Overdue",
-            message=f"Your rent payment for {instance.month_for.strftime('%B %Y')} is overdue by {instance.days_overdue} days.",
             notification_type='OVERDUE_RENT',
             related_payment=instance
-        )
+        ).exists()
+        if not already_notified:
+            Notification.create_notification(
+                user=instance.tenant.user,
+                title="Rent Overdue",
+                message=f"Your rent payment for {instance.month_for.strftime('%B %Y')} is overdue by {instance.days_overdue} days.",
+                notification_type='OVERDUE_RENT',
+                related_payment=instance
+            )
     elif instance.status == 'PAID' and created:
         Notification.create_notification(
             user=instance.tenant.user,

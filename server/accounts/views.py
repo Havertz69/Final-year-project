@@ -5,6 +5,13 @@ from rest_framework.exceptions import ValidationError
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 from django.contrib.auth import get_user_model
+from django.utils.decorators import method_decorator
+try:
+    from ratelimit.decorators import ratelimit
+    RATELIMIT_AVAILABLE = True
+except ImportError:
+    RATELIMIT_AVAILABLE = False
+
 from .serializers import (
     UserRegistrationSerializer,
     UserLoginSerializer,
@@ -45,17 +52,32 @@ class RegisterView(generics.CreateAPIView):
 
 class LoginView(generics.GenericAPIView):
     """
-    User login endpoint
+    User login endpoint — rate limited to 10 attempts per minute per IP.
     """
     serializer_class = UserLoginSerializer
     permission_classes = [permissions.AllowAny]
-    
+
     def post(self, request, *args, **kwargs):
+        # Rate limiting: max 10 login attempts per minute per IP
+        if RATELIMIT_AVAILABLE:
+            from ratelimit.utils import is_ratelimited
+            limited = is_ratelimited(
+                request,
+                group='login',
+                key='ip',
+                rate='10/m',
+                increment=True
+            )
+            if limited:
+                return Response(
+                    {'error': 'Too many login attempts. Please wait a minute and try again.'},
+                    status=status.HTTP_429_TOO_MANY_REQUESTS
+                )
+
         serializer = self.get_serializer(data=request.data)
         try:
             serializer.is_valid(raise_exception=True)
         except ValidationError:
-            # Preserve DRF's normal 400 response shape
             raise
 
         user = serializer.validated_data['user']
@@ -66,7 +88,7 @@ class LoginView(generics.GenericAPIView):
             ip = x_forwarded_for.split(',')[0]
         else:
             ip = request.META.get('REMOTE_ADDR')
-        
+
         UserLoginLog.objects.create(
             user=user,
             ip_address=ip,

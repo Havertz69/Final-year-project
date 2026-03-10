@@ -219,13 +219,17 @@ export default function LoginPage() {
               />
               
               <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: -1 }}>
-                <Button variant="text" sx={{ 
-                  color: '#3b82f6', 
-                  fontSize: '0.875rem', 
-                  fontWeight: 600,
-                  textTransform: 'none',
-                  '&:hover': { bgcolor: 'transparent', textDecoration: 'underline' }
-                }}>
+                <Button
+                  variant="text"
+                  onClick={() => window.location.href = 'mailto:admin@propertypulse.com?subject=Password%20Reset%20Request'}
+                  sx={{
+                    color: '#3b82f6',
+                    fontSize: '0.875rem',
+                    fontWeight: 600,
+                    textTransform: 'none',
+                    '&:hover': { bgcolor: 'transparent', textDecoration: 'underline' }
+                  }}
+                >
                   Forgot password?
                 </Button>
               </Box>
@@ -260,15 +264,19 @@ export default function LoginPage() {
           <Box sx={{ mt: 4, textAlign: 'center' }}>
             <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 500 }}>
               Don't have an account?{' '}
-              <Button variant="text" sx={{ 
-                color: '#3b82f6', 
-                fontWeight: 700, 
-                textTransform: 'none',
-                minWidth: 0,
-                p: 0,
-                ml: 0.5,
-                '&:hover': { bgcolor: 'transparent', textDecoration: 'underline' }
-              }}>
+              <Button
+                variant="text"
+                onClick={() => window.location.href = 'mailto:admin@propertypulse.com?subject=New%20Account%20Request'}
+                sx={{
+                  color: '#3b82f6',
+                  fontWeight: 700,
+                  textTransform: 'none',
+                  minWidth: 0,
+                  p: 0,
+                  ml: 0.5,
+                  '&:hover': { bgcolor: 'transparent', textDecoration: 'underline' }
+                }}
+              >
                 Contact management
               </Button>
             </Typography>
