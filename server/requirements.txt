@@ -23,3 +23,6 @@ django-ratelimit==4.1.0
 
 # Filtering — used in list views
 django-filter==23.3
+
+# AI Chatbot
+google-generativeai==0.3.1

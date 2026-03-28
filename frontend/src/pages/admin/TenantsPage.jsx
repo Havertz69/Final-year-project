@@ -49,7 +49,7 @@ export default function TenantsPage() {
     return tenants.filter(tenant => 
       (tenant.user_full_name || '').toLowerCase().includes(t) ||
       (tenant.user_email || '').toLowerCase().includes(t) ||
-      (tenant.unit_number || '').toLowerCase().includes(t)
+      (tenant.unit_info?.unit_number || '').toLowerCase().includes(t)
     );
   }, [tenants, searchTerm]);
 
@@ -141,9 +141,12 @@ export default function TenantsPage() {
               <TableRow key={t.id}>
                 <TableCell>{t.user_full_name}</TableCell>
                 <TableCell>{t.user_email}</TableCell>
-                <TableCell>{t.unit_number || '—'}</TableCell>
+                <TableCell>{t.unit_info?.unit_number || '—'}</TableCell>
                 <TableCell>{t.move_in_date || '—'}</TableCell>
                 <TableCell align="right">
+                  <Button size="small" onClick={() => adminService.downloadLeasePDF(t.active_lease_id)} disabled={!t.active_lease_id}>
+                    Lease
+                  </Button>
                   <Button size="small" color="error" onClick={() => { setDeleteId(t.id); setConfirmOpen(true); }}>
                     Unassign
                   </Button>

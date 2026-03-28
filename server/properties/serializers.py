@@ -176,14 +176,22 @@ class TenantProfileSerializer(serializers.ModelSerializer):
     user_email = serializers.CharField(source='user.email', read_only=True)
     user_full_name = serializers.CharField(source='user.full_name', read_only=True)
     unit_info = serializers.SerializerMethodField()
+    active_lease_id = serializers.SerializerMethodField()
 
     class Meta:
         model = TenantProfile
         fields = [
             'id', 'user', 'user_email', 'user_full_name', 'assigned_unit',
-            'unit_info', 'move_in_date', 'lease_end_date', 'security_deposit', 'created_at', 'updated_at'
+            'unit_info', 'active_lease_id', 'move_in_date', 'lease_end_date', 'security_deposit', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id', 'created_at', 'updated_at'
+        ]
+
+    def get_active_lease_id(self, obj):
+        """Get the ID of the most recent lease"""
+        lease = obj.leases.first()
+        return lease.id if lease else None
 
     def get_unit_info(self, obj):
         """Get detailed unit information"""
@@ -268,26 +276,36 @@ class TenantAssignmentSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        """Create or update tenant profile"""
+        """Create or update tenant profile and handle unit occupancy"""
         user = validated_data.pop('user_email')
         unit = validated_data.pop('unit_id')
         
         # Get or create tenant profile
-        tenant_profile, created = TenantProfile.objects.get_or_create(
-            user=user,
-            defaults=validated_data
-        )
+        tenant_profile, created = TenantProfile.objects.get_or_create(user=user)
         
-        if not created:
-            # Update existing tenant profile
-            tenant_profile.assigned_unit = unit
-            tenant_profile.move_in_date = validated_data.get('move_in_date')
-            tenant_profile.lease_end_date = validated_data.get('lease_end_date')
+        # Update tenant profile fields
+        tenant_profile.assigned_unit = unit
+        tenant_profile.move_in_date = validated_data.get('move_in_date')
+        tenant_profile.lease_end_date = validated_data.get('lease_end_date')
+        
+        if 'security_deposit' in validated_data:
+            tenant_profile.security_deposit = validated_data.get('security_deposit')
             
-            if 'security_deposit' in validated_data:
-                tenant_profile.security_deposit = validated_data.get('security_deposit')
-                
-            tenant_profile.save()
+        tenant_profile.save()
+
+        # Update unit status
+        unit.is_occupied = True
+        unit.save()
+
+        # Create an explicit Lease record
+        Lease.objects.create(
+            tenant=tenant_profile,
+            unit=unit,
+            start_date=tenant_profile.move_in_date,
+            end_date=tenant_profile.lease_end_date or (tenant_profile.move_in_date + timedelta(days=365)),
+            rent_amount=unit.rent_amount,
+            deposit=tenant_profile.security_deposit
+        )
         
         return tenant_profile
 

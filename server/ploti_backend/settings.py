@@ -200,6 +200,12 @@ ALLOWED_UPLOAD_CONTENT_TYPES = [
     'image/jpeg', 'image/png', 'image/webp', 'application/pdf'
 ]
 
+# M-Pesa Daraja API (sandbox)
+MPESA_CONSUMER_KEY = os.getenv('CONSUMER_KEY', '')
+MPESA_CONSUMER_SECRET = os.getenv('CONSUMER_SECRET', '')
+# Callback base URL — override in production with your public domain
+MPESA_CALLBACK_BASE_URL = os.getenv('MPESA_CALLBACK_BASE_URL', 'https://sandbox.safaricom.co.ke')
+
 # Security headers (safe defaults — tighten for HTTPS production)
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True

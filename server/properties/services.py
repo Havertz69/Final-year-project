@@ -1,7 +1,7 @@
 """
 Service layer for business logic and smart features
 """
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from django.utils import timezone
 from django.db import models
 from django.db.models import Q
@@ -260,7 +260,7 @@ class ReportService:
     @staticmethod
     def generate_monthly_report(year, month):
         """Generate monthly financial report"""
-        from .models import Unit, TenantProfile
+        from .models import Unit, TenantProfile, Property
         
         # Occupancy stats
         total_units = Unit.objects.count()
@@ -284,8 +284,61 @@ class ReportService:
             total=models.Sum('amount_paid')
         )['total'] or 0
 
+        # Data for the new AdminFinancialReport.jsx
+        monthly_revenue_trends = ReportService.get_revenue_trends(months=3)
+        
+        property_occupancy = []
+        for prop in Property.objects.all():
+            p_units = Unit.objects.filter(property_obj=prop)
+            p_total = p_units.count()
+            p_occupied = p_units.filter(is_occupied=True).count()
+            property_occupancy.append({
+                'name': prop.name,
+                'total': p_total,
+                'occupied': p_occupied,
+                'occupancy': round((p_occupied / p_total * 100) if p_total > 0 else 0, 1)
+            })
+
+        recent_payments = []
+        for p in payments.select_related('tenant__user', 'unit__property_obj').order_by('-payment_date')[:10]:
+            recent_payments.append({
+                'id': p.id,
+                'tenant': p.tenant.user.full_name,
+                'unit': p.unit.unit_number,
+                'property': p.unit.property_obj.name,
+                'amount': float(p.amount_paid or 0),
+                'mpesa_ref': p.transaction_reference or 'N/A',
+                'date': p.payment_date.strftime('%d %b %Y') if p.payment_date else 'N/A',
+                'status': p.status.lower()
+            })
+
         return {
             'period': f"{year}-{month:02d}",
+            'report_month': date(year, month, 1).strftime('%B %Y'),
+            'generated_date': timezone.now().strftime('%d %b %Y'),
+            'metrics': {
+                'total_collected': float(total_revenue),
+                'outstanding': float(total_pending),
+                'outstanding_tenants': payments.filter(status__in=['PENDING', 'OVERDUE']).values('tenant').distinct().count(),
+                'occupancy_rate': float(occupancy_rate),
+                'occupied_units': occupied_units,
+                'total_units': total_units,
+                'pending_approvals': payments.filter(status='PENDING').count()
+            },
+            'monthly_revenue': [
+                {
+                    'month': d['month'].split(' ')[0], 
+                    'collected': d['revenue'], 
+                    'outstanding': float(Payment.objects.filter(
+                        month_for__year=datetime.strptime(d['month'], '%b %Y').year,
+                        month_for__month=datetime.strptime(d['month'], '%b %Y').month,
+                        status__in=['PENDING', 'OVERDUE']
+                    ).aggregate(sum=models.Sum('amount_paid'))['sum'] or 0)
+                } for d in monthly_revenue_trends
+            ],
+            'properties': property_occupancy,
+            'payments': recent_payments,
+            # Legacy fields for backward compatibility
             'total_revenue': float(total_revenue),
             'expected_revenue': float(expected_revenue),
             'total_pending': float(total_pending),
@@ -301,7 +354,6 @@ class ReportService:
             'occupied_units': occupied_units,
             'vacant_units': vacant_units,
             'occupancy_rate': occupancy_rate,
-            # Keep legacy keys
             'total_income': float(total_revenue),
             'expected_income': float(expected_revenue),
         }
@@ -423,4 +475,129 @@ class ReportService:
                 p.status,
                 p.transaction_reference or '',
             ])
-        return response
+
+class LeaseService:
+    """Service for lease document operations"""
+    
+    @staticmethod
+    def generate_lease_pdf(lease):
+        """
+        Generate a professional lease agreement PDF.
+        """
+        import io
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, ListFlowable, ListItem
+        from reportlab.lib.units import inch
+        
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=72)
+        styles = getSampleStyleSheet()
+        
+        # Custom Styles
+        title_style = ParagraphStyle(
+            'LeaseTitle',
+            parent=styles['Heading1'],
+            fontSize=22,
+            textColor=colors.HexColor("#1e293b"),
+            alignment=1,
+            spaceAfter=30
+        )
+        
+        section_style = ParagraphStyle(
+            'LeaseSection',
+            parent=styles['Heading2'],
+            fontSize=14,
+            textColor=colors.HexColor("#334155"),
+            spaceBefore=15,
+            spaceAfter=10,
+            fontName='Helvetica-Bold'
+        )
+        
+        body_style = ParagraphStyle(
+            'LeaseBody',
+            parent=styles['Normal'],
+            fontSize=11,
+            leading=14,
+            spaceAfter=10
+        )
+        
+        elements = []
+        
+        # 1. Header
+        elements.append(Paragraph("RESIDENTIAL LEASE AGREEMENT", title_style))
+        elements.append(Paragraph(f"This Residential Lease Agreement (\"Agreement\") is made and entered into on {date.today().strftime('%B %d, %Y')}, by and between the Landlord and Tenant identified below.", body_style))
+        elements.append(Spacer(1, 0.2 * inch))
+        
+        # 2. Parties and Property
+        elements.append(Paragraph("1. PARTIES AND PROPERTY", section_style))
+        parties_data = [
+            ["LANDLORD:", "Property Pulse Management"],
+            ["TENANT:", lease.tenant.user.full_name],
+            ["PROPERTY:", lease.unit.property_obj.name],
+            ["LOCATION:", lease.unit.property_obj.location],
+            ["UNIT NUMBER:", lease.unit.unit_number]
+        ]
+        
+        t = Table(parties_data, colWidths=[1.5 * inch, 4.5 * inch])
+        t.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 11),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ]))
+        elements.append(t)
+        elements.append(Spacer(1, 0.2 * inch))
+        
+        # 3. Term and Rent
+        elements.append(Paragraph("2. LEASE TERM AND RENT", section_style))
+        term_data = [
+            ["START DATE:", lease.start_date.strftime('%B %d, %Y')],
+            ["END DATE:", lease.end_date.strftime('%B %d, %Y')],
+            ["MONTHLY RENT:", f"KES {float(lease.rent_amount):,.2f}"],
+            ["SECURITY DEPOSIT:", f"KES {float(lease.deposit):,.2f}"]
+        ]
+        
+        t2 = Table(term_data, colWidths=[1.5 * inch, 4.5 * inch])
+        t2.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 11),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        elements.append(t2)
+        elements.append(Spacer(1, 0.2 * inch))
+        
+        # 4. Terms and Conditions
+        elements.append(Paragraph("3. TERMS AND CONDITIONS", section_style))
+        clauses = [
+            "The Tenant shall use the premises for residential purposes only.",
+            "Rent is due on the 5th day of every month. Late payments may incur penalties.",
+            "The Tenant is responsible for keeping the unit in a clean and sanitary condition.",
+            "No alterations to the property shall be made without prior written consent from the Landlord.",
+            "The Landlord reserves the right to enter the premises for inspection or repairs with reasonable notice."
+        ]
+        
+        items = [ListItem(Paragraph(c, body_style)) for c in clauses]
+        elements.append(ListFlowable(items, bulletType='bullet'))
+        elements.append(Spacer(1, 0.4 * inch))
+        
+        # 5. Signatures
+        elements.append(Paragraph("4. SIGNATURES", section_style))
+        sig_data = [
+            ["__________________________", "__________________________"],
+            ["Landlord Signature", "Tenant Signature"],
+            ["Date: ____________________", "Date: ____________________"]
+        ]
+        
+        ts = Table(sig_data, colWidths=[3 * inch, 3 * inch])
+        ts.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('TOPPADDING', (0, 0), (-1, 0), 40),
+            ('FONTSIZE', (0, 1), (-1, 1), 9),
+        ]))
+        elements.append(ts)
+        
+        doc.build(elements)
+        buffer.seek(0)
+        return buffer

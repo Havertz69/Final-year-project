@@ -17,7 +17,8 @@ import EmptyState from '../../components/common/EmptyState';
 import ErrorState from '../../components/common/ErrorState';
 import AdminPageShell from '../../components/admin/AdminPageShell';
 import adminService from '../../services/adminService';
-import { getApiErrorMessage, parseListResponse } from '../../utils/apiUtils';
+import { getApiErrorMessage } from '../../utils/apiUtils';
+import AdminFinancialReport from './AdminFinancialReport';
 
 export default function ReportsPage() {
   const [reportData, setReportData] = useState(null);
@@ -34,20 +35,14 @@ export default function ReportsPage() {
   const fetchData = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const [rRes, tRes, pRes] = await Promise.all([
-        adminService.getReports(filters.year, filters.month),
-        adminService.getRevenueTrends(12),
-        adminService.getProperties()
-      ]);
-      setReportData(rRes.data.report);
-      setTrends(parseListResponse(tRes.data.trends || tRes.data));
-      setProperties(parseListResponse(pRes.data));
+      const response = await adminService.getReports(filters.year, filters.month);
+      setReportData(response.data.report);
     } catch (e) {
       setError(getApiErrorMessage(e, 'Failed to generate report'));
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, [filters.month, filters.year]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -70,8 +65,8 @@ export default function ReportsPage() {
   if (error) return <ErrorState message={error} onRetry={fetchData} />;
 
   return (
-    <AdminPageShell title="Reports & Analytics" subtitle="Financial performance and occupancy trends.">
-      <Box sx={{ mb: 4, display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+    <AdminPageShell title="Financial Reports" subtitle="Comprehensive property performance and revenue analysis.">
+      <Box sx={{ mb: 4, display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center', bgcolor: 'white', p: 2, borderRadius: 1 }}>
         <FormControl size="small" sx={{ minWidth: 120 }}>
           <InputLabel>Month</InputLabel>
           <Select
@@ -96,85 +91,20 @@ export default function ReportsPage() {
             {[2024, 2025, 2026].map(y => <MenuItem key={y} value={y}>{y}</MenuItem>)}
           </Select>
         </FormControl>
-        <FormControl size="small" sx={{ minWidth: 200 }}>
-          <InputLabel>Property</InputLabel>
-          <Select
-            value={filters.propertyId}
-            label="Property"
-            onChange={(e) => setFilters({ ...filters, propertyId: e.target.value })}
-          >
-            <MenuItem value="">All Properties</MenuItem>
-            {properties.map(p => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
-          </Select>
-        </FormControl>
-        <Button variant="outlined" startIcon={<DownloadIcon />} onClick={handleExportPDF}>Export PDF</Button>
       </Box>
 
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} md={4}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                <AccountBalanceWallet color="primary" />
-                <Typography color="text.secondary">Total Revenue</Typography>
-              </Box>
-              <Typography variant="h4">KES {reportData?.total_revenue?.toLocaleString() || 0}</Typography>
-              <Typography variant="caption" color="success.main" sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
-                <TrendingUp fontSize="small" /> +12% from last month
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                <TrendingUp color="info" />
-                <Typography color="text.secondary">Occupancy Rate</Typography>
-              </Box>
-              <Typography variant="h4">{reportData?.occupancy_rate || 0}%</Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>
-                {reportData?.occupied_units || 0} of {reportData?.total_units || 0} units
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                <TrendingDown color="warning" />
-                <Typography color="text.secondary">Pending Payments</Typography>
-              </Box>
-              <Typography variant="h4">KES {reportData?.total_pending?.toLocaleString() || 0}</Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>
-                {reportData?.pending_count || 0} payments outstanding
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      <Paper sx={{ p: 3, mb: 4 }}>
-        <Typography variant="h6" gutterBottom>Revenue Trends</Typography>
-        <Box sx={{ height: 300, mt: 2 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={trends}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="month" />
-              <YAxis tickFormatter={(value) => `KES ${value / 1000}k`} />
-              <ChartTooltip formatter={(value) => `KES ${value.toLocaleString()}`} />
-              <Area type="monotone" dataKey="revenue" stroke="#3b82f6" fillOpacity={1} fill="url(#colorRev)" />
-              <defs>
-                <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-            </AreaChart>
-          </ResponsiveContainer>
-        </Box>
-      </Paper>
+      {reportData ? (
+        <AdminFinancialReport 
+          report_month={reportData.report_month}
+          generated_date={reportData.generated_date}
+          metrics={reportData.metrics}
+          monthly_revenue={reportData.monthly_revenue}
+          properties={reportData.properties}
+          payments={reportData.payments}
+        />
+      ) : (
+        <EmptyState title="No Report Data" message="Adjust your filters or try again later." />
+      )}
     </AdminPageShell>
   );
 }

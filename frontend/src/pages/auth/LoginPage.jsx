@@ -2,14 +2,17 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Card, Typography, TextField, Button,
-  Alert, CircularProgress, InputAdornment, IconButton, Grid, Paper
+  Alert, CircularProgress, InputAdornment, IconButton, Grid, Paper,
+  Backdrop
 } from '@mui/material';
 import {
   Email as EmailIcon,
   Lock as LockIcon,
   Visibility,
   VisibilityOff,
-  HomeWork as HomeWorkIcon
+  HomeWork as HomeWorkIcon,
+  CheckCircle as CheckCircleIcon,
+  ErrorOutline as ErrorOutlineIcon
 } from '@mui/icons-material';
 import useAuth from '../../hooks/useAuth';
 
@@ -22,6 +25,9 @@ export default function LoginPage() {
   const [errors, setErrors] = useState({});
   const [apiError, setApiError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [checkingIdentity, setCheckingIdentity] = useState(false);
+  const [loginSuccess, setLoginSuccess] = useState(false);
+  const [loginError, setLoginError] = useState(false);
   const { login, token, role } = useAuth();
   const navigate = useNavigate();
 
@@ -44,12 +50,35 @@ export default function LoginPage() {
     ev.preventDefault();
     if (!validate()) return;
     setLoading(true);
+    setCheckingIdentity(true);
+    setLoginSuccess(false);
+    setLoginError(false);
     setApiError('');
+    
+    // 1. Initial Identity Check (1.2 seconds to leave room for the final state)
+    const checkStartTime = Date.now();
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
     try {
+      // 2. Attempt Login
       const r = await login(email, password);
-      // Success is handled by the useEffect above
+      
+      // 3. Success State (Total duration exactly 2 seconds)
+      setLoginSuccess(true);
+      const elapsed = Date.now() - checkStartTime;
+      const remainingTime = Math.max(0, 2000 - elapsed);
+      await new Promise(resolve => setTimeout(resolve, remainingTime));
+      
     } catch (err) {
+      // 3. Error State (Total duration exactly 2 seconds)
+      setLoginError(true);
+      const elapsed = Date.now() - checkStartTime;
+      const remainingTime = Math.max(0, 2000 - elapsed);
+      await new Promise(resolve => setTimeout(resolve, remainingTime));
+      
       setApiError(err.errorMessage || 'Login failed. Please check your credentials.');
+      setCheckingIdentity(false);
+      setLoginError(false);
     } finally {
       setLoading(false);
     }
@@ -289,6 +318,75 @@ export default function LoginPage() {
           </Box>
         </Box>
       </Card>
+
+      <Backdrop
+        sx={{ 
+          color: '#fff', 
+          zIndex: (theme) => theme.zIndex.drawer + 1,
+          flexDirection: 'column',
+          backdropFilter: 'blur(10px)',
+          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+          transition: 'all 0.5s ease'
+        }}
+        open={checkingIdentity}
+      >
+        {!loginSuccess && !loginError ? (
+          <>
+            <CircularProgress color="inherit" size={60} thickness={4} sx={{ mb: 2 }} />
+            <Typography variant="h5" sx={{ fontWeight: 700, letterSpacing: '0.05em' }}>
+              Checking identity...
+            </Typography>
+            <Typography variant="body2" sx={{ mt: 1, opacity: 0.8 }}>
+              Please wait while we verify your credentials.
+            </Typography>
+          </>
+        ) : loginSuccess ? (
+          <>
+            <Box sx={{ 
+              bgcolor: 'rgba(34, 197, 94, 0.2)', 
+              p: 2, 
+              borderRadius: '50%',
+              display: 'flex',
+              mb: 2,
+              animation: 'scaleIn 0.3s ease-out'
+            }}>
+              <CheckCircleIcon sx={{ color: '#22c55e', fontSize: 60 }} />
+            </Box>
+            <Typography variant="h4" sx={{ fontWeight: 800, letterSpacing: '-0.02em', mb: 1 }}>
+              Login Successful!
+            </Typography>
+            <Typography variant="body1" sx={{ opacity: 0.9 }}>
+              Redirecting to your dashboard...
+            </Typography>
+          </>
+        ) : (
+          <>
+            <Box sx={{ 
+              bgcolor: 'rgba(239, 68, 68, 0.2)', 
+              p: 2, 
+              borderRadius: '50%',
+              display: 'flex',
+              mb: 2,
+              animation: 'scaleIn 0.3s ease-out'
+            }}>
+              <ErrorOutlineIcon sx={{ color: '#ef4444', fontSize: 60 }} />
+            </Box>
+            <Typography variant="h4" sx={{ fontWeight: 800, letterSpacing: '-0.02em', mb: 1 }}>
+              Access Denied
+            </Typography>
+            <Typography variant="body1" sx={{ opacity: 0.9 }}>
+              Invalid credentials provided.
+            </Typography>
+          </>
+        )}
+        
+        <style dangerouslySetInnerHTML={{ __html: `
+          @keyframes scaleIn {
+            from { transform: scale(0); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+          }
+        `}} />
+      </Backdrop>
     </Box>
   );
 }

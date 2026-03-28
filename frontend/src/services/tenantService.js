@@ -10,7 +10,7 @@ const tenantService = {
   }),
   getMaintenance: () => api.get('/my-maintenance/'),
   createMaintenance: (data) => api.post('/my-maintenance/', data),
-  sendChatMessage: (data) => api.post('/messages/', data),
+  sendChatMessage: (data) => api.post('/chatbot/', data),
   getPaymentEvidence: () => api.get('/my-payment-evidence/'),
   uploadPaymentEvidence: (formData) => api.post('/my-payment-evidence/', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
@@ -23,6 +23,18 @@ const tenantService = {
   markNotificationsRead: (data) => api.post('/my-notifications/mark-read/', data),
   updateProfile: (data) => api.patch('/my-profile/update/', data),
   changePassword: (data) => api.post('/my-profile/change-password/', data),
+  initiateMpesaStkPush: (data) => api.post('/tenant/payments/mpesa-stk-push/', data),
+  downloadLeasePDF: (leaseId) => api.get(`/leases/${leaseId}/export-pdf/`, { responseType: 'blob' })
+    .then(response => {
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `Lease_Agreement_${leaseId}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    }),
 };
 
 export default tenantService;

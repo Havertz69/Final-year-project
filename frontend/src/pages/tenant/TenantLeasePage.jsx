@@ -153,25 +153,50 @@ export default function TenantLeasePage() {
             icon={<DescriptionIcon sx={{ color: '#EA580C' }} />}
             title="Lease Document"
           >
-            {lease?.lease_document_url ? (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-                <Typography variant="body2" color="text.secondary">
-                  Your signed lease agreement is available for download.
-                </Typography>
-                <Button
-                  variant="contained"
-                  startIcon={<DownloadIcon />}
-                  href={lease.lease_document_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  sx={{ borderRadius: 2 }}
-                >
-                  Download Lease
-                </Button>
+            {lease ? (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {lease.lease_document_url ? (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Your signed lease agreement is available for download.
+                    </Typography>
+                    <Button
+                      variant="outlined"
+                      startIcon={<DownloadIcon />}
+                      href={lease.lease_document_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      size="small"
+                      sx={{ borderRadius: 2 }}
+                    >
+                      Download Signed Copy
+                    </Button>
+                  </Box>
+                ) : (
+                  <Alert severity="info" sx={{ borderRadius: 2, py: 0.5 }}>
+                    No signed copy uploaded yet.
+                  </Alert>
+                )}
+                
+                <Divider />
+                
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                  <Typography variant="body2" color="text.secondary">
+                    Download an official system-generated copy of your lease details.
+                  </Typography>
+                  <Button
+                    variant="contained"
+                    startIcon={<DescriptionIcon />}
+                    onClick={() => tenantService.downloadLeasePDF(lease.id)}
+                    sx={{ borderRadius: 2, bgcolor: '#EA580C', '&:hover': { bgcolor: '#c2410c' } }}
+                  >
+                    Generate Official Lease PDF
+                  </Button>
+                </Box>
               </Box>
             ) : (
               <Alert severity="info" sx={{ borderRadius: 2 }}>
-                No lease document uploaded yet. Please contact your property manager.
+                No active lease on record to generate documents.
               </Alert>
             )}
           </LeaseCard>

@@ -54,6 +54,7 @@ urlpatterns = [
     
     # Download Receipt
     path('payments/<int:pk>/receipt/', views.download_payment_receipt, name='download-payment-receipt'),
+    path('payments/<int:pk>/receipt/view/', views.view_rent_receipt, name='view-payment-receipt-html'),
 
     # Maintenance Requests
     path('my-maintenance/', views.TenantMaintenanceRequestListCreateView.as_view(), name='tenant-maintenance'),
@@ -71,6 +72,7 @@ urlpatterns = [
     path('my-lease-document/', views.tenant_lease_document, name='tenant-lease-document'),
     path('lease-documents/', views.AdminLeaseDocumentListView.as_view(), name='admin-lease-documents'),
     path('lease-documents/create/', views.AdminLeaseDocumentCreateView.as_view(), name='admin-lease-document-create'),
+    path('leases/<int:pk>/export-pdf/', views.export_lease_pdf, name='export-lease-pdf'),
 
     # Notifications
     path('my-notifications/', views.tenant_notifications, name='tenant-notifications'),
@@ -118,6 +120,13 @@ urlpatterns = [
 
     # Profile V2 — returns profile + unit + active lease
     path('tenant/profile/', views.tenant_full_profile, name='tenant-profile-v2'),
+
+    # Chatbot API
+    path('chatbot/', views.ChatbotAPIView.as_view(), name='chatbot-api'),
+
+    # M-Pesa Integration
+    path('tenant/payments/mpesa-stk-push/', views.mpesa_stk_push_view, name='mpesa-stk-push'),
+    path('mpesa/callback/', views.mpesa_callback_view, name='mpesa-callback'),
 ]
 
 

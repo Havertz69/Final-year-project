@@ -1,0 +1,359 @@
+/*
+  Location: frontend/src/pages/admin/AdminFinancialReport.css
+  Purpose: Scoped styling for the Admin Financial Report dashboard.
+*/
+
+.pms-report {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: #333;
+  background-color: #f8fafc;
+  padding: 24px;
+  min-height: 100vh;
+}
+
+/* Header */
+.pms-report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 32px;
+}
+
+.pms-report-title-section h1 {
+  font-size: 24px;
+  font-weight: 700;
+  color: #0C447C;
+  margin: 0 0 4px 0;
+}
+
+.pms-report-subtitle {
+  font-size: 14px;
+  color: #64748b;
+  margin: 0;
+}
+
+.pms-report-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.pms-btn {
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.pms-btn-outlined {
+  background: white;
+  border: 1.5px solid #0C447C;
+  color: #0C447C;
+}
+
+.pms-btn-outlined:hover {
+  background: #f1f5f9;
+}
+
+.pms-btn-solid {
+  background: #0C447C;
+  color: white;
+}
+
+.pms-btn-solid:hover {
+  background: #185FA5;
+}
+
+/* Metric Cards */
+.pms-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+  margin-bottom: 32px;
+}
+
+.pms-metric-card {
+  background: #f1f5f9; /* Light grey */
+  padding: 24px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pms-metric-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.pms-metric-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #0C447C;
+}
+
+.pms-trend-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  width: fit-content;
+}
+
+.pms-trend-up {
+  color: #0F6E56;
+  background: #E1F5EE;
+}
+
+.pms-trend-down {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+
+.pms-badge-blue {
+  background: #B5D4F4;
+  color: #185FA5;
+}
+
+/* Charts Row */
+.pms-charts-grid {
+  display: grid;
+  grid-template-columns: 1.8fr 1fr;
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.pms-chart-card {
+  background: white;
+  padding: 24px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+.pms-chart-card h2 {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0C447C;
+  margin: 0 0 20px 0;
+}
+
+/* Custom Legend for Chart.js */
+.pms-chart-legend {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.pms-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.pms-legend-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+/* Occupancy Bars (Pure CSS) */
+.pms-occupancy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.pms-occupancy-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pms-property-name {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pms-progress-bg {
+  width: 100%;
+  height: 12px;
+  background: #f1f5f9;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.pms-progress-fill {
+  height: 100%;
+  background: #0C447C;
+  border-radius: 6px;
+  transition: width 0.5s ease-out;
+}
+
+/* Table Card */
+.pms-table-card {
+  background: white;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+}
+
+.pms-table-card h2 {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0C447C;
+  padding: 24px 24px 16px 24px;
+  margin: 0;
+}
+
+.pms-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.pms-table th {
+  text-align: left;
+  padding: 12px 24px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.pms-table td {
+  padding: 16px 24px;
+  font-size: 14px;
+  border-bottom: 0.5px solid #e2e8f0;
+}
+
+.pms-ref-code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-weight: 600;
+  color: #475569;
+}
+
+/* Status Badges */
+.pms-status-badge {
+  display: inline-flex;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.status-approved {
+  background: #E1F5EE;
+  color: #0F6E56;
+}
+
+.status-pending {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.status-overdue {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+/* Print Styles */
+@media print {
+  /* Hide the main application navigation and decorative elements */
+  .MuiDrawer-root, 
+  .MuiAppBar-root, 
+  .MuiToolbar-root,
+  .pms-report-actions, 
+  .chatbot-fab,
+  .no-print {
+    display: none !important;
+  }
+
+  /* Reset page layout to use full width */
+  body, #root, main, .pms-report {
+    background: white !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    min-width: 100% !important;
+    position: static !important;
+    overflow: visible !important;
+  }
+
+  .pms-report {
+    min-height: auto !important;
+  }
+
+  /* Adjust metric cards for grid print */
+  .pms-metrics-grid {
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 15px !important;
+  }
+
+  .pms-metric-card {
+    border: 1px solid #e2e8f0 !important;
+    background: #f8fafc !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    break-inside: avoid;
+  }
+
+  /* Adjust charts and tables */
+  .pms-charts-grid {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 20px !important;
+  }
+
+  .pms-chart-card, .pms-table-card {
+    border: 1px solid #e2e8f0 !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .pms-table th {
+    background: #f1f5f9 !important;
+    color: #475569 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Force colors for printing */
+  .pms-metric-value, .pms-report-title-section h1 {
+    color: #0C447C !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .pms-metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .pms-charts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .pms-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+  .pms-report-header {
+    flex-direction: column;
+    gap: 20px;
+  }
+}

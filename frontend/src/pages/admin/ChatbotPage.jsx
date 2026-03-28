@@ -27,7 +27,6 @@ export default function ChatbotPage() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
-
   const handleSend = async () => {
     if (!input.trim()) return;
 
@@ -44,32 +43,19 @@ export default function ChatbotPage() {
     setLoading(true);
 
     try {
-      // Find an admin ID to "message" for the chatbot logic on backend
-      // In a real app, we might have a dedicated bot user
       const res = await adminService.sendChatMessage({
-        subject: 'Chatbot',
-        body: currentInput,
-        receiver: 1 // Assuming 1 is an admin
+        message: currentInput,
+        history: messages
       });
       
-      // The backend creates a reply asynchronously or we can poll
-      // For this simplified version, let's just refresh messages after a short delay
-      setTimeout(async () => {
-        try {
-          const mRes = await adminService.getMessages(); // Base messages for chatbot/admin
-          const list = parseListResponse(mRes.data);
-          // Sort by timestamp and update
-          setMessages([
-            { id: 'welcome', body: "Hello! I'm your Property Pulse assistant. Ask me about occupancy, revenue, or units.", sender_role: 'ADMIN', timestamp: new Date().toISOString() },
-            ...list.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
-          ]);
-        } catch (e) {
-          console.error("Failed to fetch messages", e);
-        } finally {
-          setLoading(false);
-        }
-      }, 1000);
-
+      const botMsg = {
+        id: Date.now() + 1,
+        body: res.data.reply || res.data.message,
+        sender_role: 'ADMIN',
+        timestamp: new Date().toISOString()
+      };
+      
+      setMessages(prev => [...prev, botMsg]);
     } catch (e) {
       setMessages(prev => [...prev, { 
         id: 'err', 
@@ -77,6 +63,7 @@ export default function ChatbotPage() {
         sender_role: 'ADMIN', 
         timestamp: new Date().toISOString() 
       }]);
+    } finally {
       setLoading(false);
     }
   };

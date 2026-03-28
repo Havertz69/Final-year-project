@@ -18,11 +18,23 @@ const adminService = {
   updateMaintenance: (id, data) => api.patch(`/maintenance/${id}/`, data),
   getRevenueTrends: (months = 12) => api.get(`/reports/revenue-trends/?months=${months}`),
   exportPaymentsCSV: (year, month) => api.get(`/reports/export-csv/`, { params: { year, month }, responseType: 'blob' }),
-  getChatbot: () => api.get('/messages/'),
-  sendChatMessage: (data) => api.post('/messages/', data),
+  getChatbot: () => api.get('/chatbot/'),
+  sendChatMessage: (data) => api.post('/chatbot/', data),
   getPaymentEvidence: () => api.get('/payment-evidence/'),
   updatePaymentEvidence: (id, data) => api.patch(`/payment-evidence/${id}/`, data),
   exportReportPDF: (year, month) => api.get(`/smart/reports/export-pdf/`, { params: { year, month }, responseType: 'blob' }),
+  exportReceiptPDF: (paymentId) => api.get(`/payments/${paymentId}/receipt/`, { responseType: 'blob' }),
+  downloadLeasePDF: (leaseId) => api.get(`/leases/${leaseId}/export-pdf/`, { responseType: 'blob' })
+    .then(response => {
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `Lease_Agreement_${leaseId}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    }),
 };
 
 export default adminService;

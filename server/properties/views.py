@@ -4,12 +4,17 @@ from rest_framework import generics, status, permissions, filters
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from django.contrib.auth import get_user_model
+from django.views.decorators.csrf import csrf_exempt
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, render
 from django.db.models import Sum, Count, Q, F
 from django.utils import timezone
+from django.http import FileResponse
+import io
 from datetime import date, timedelta
+from rest_framework_simplejwt.authentication import JWTAuthentication
 from accounts.permissions import AdminOnly, TenantOnly
 from django.core.exceptions import ValidationError
 from .models import Property, Unit, TenantProfile, Payment, Message, Notification, MaintenanceRequest, PaymentEvidence, LeaseDocument, Lease
@@ -26,7 +31,10 @@ from .serializers import (
     LeaseDocumentSerializer, LeaseDocumentCreateSerializer,
     TenantFullProfileSerializer, NotificationSerializer
 )
-from .services import NotificationService, PaymentService, ReportService
+from .services import NotificationService, PaymentService, ReportService, LeaseService
+from .chatbot_service import ChatbotService
+from .mpesa_utils import MpesaClient
+
 
 User = get_user_model()
 
@@ -475,10 +483,12 @@ def download_payment_receipt(request, pk):
     Tenants can only download their own. Admins can download any.
     """
     try:
-        import io
-        from django.http import FileResponse
+        from reportlab.lib import colors
         from reportlab.lib.pagesizes import letter
-        from reportlab.pdfgen import canvas
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.units import inch
+        from django.http import HttpResponse
     except ImportError:
         return Response({
             'error': 'PDF generation library (reportlab) is not installed on the server. Please run "pip install reportlab" and restart the server.'
@@ -492,54 +502,195 @@ def download_payment_receipt(request, pk):
         except TenantProfile.DoesNotExist:
             return Response({'error': 'Tenant profile not found'}, status=status.HTTP_404_NOT_FOUND)
     else:
-        # Admin access
         payment = get_object_or_404(Payment, id=pk)
         
     # Check if actually paid
     if payment.status != 'PAID':
         return Response({'error': 'Receipts are only available for completely paid records.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # 2. Build PDF
-    buffer = io.BytesIO()
-    p = canvas.Canvas(buffer, pagesize=letter)
-    
-    # Header
-    p.setFont("Helvetica-Bold", 18)
-    p.drawString(100, 750, "Property Pulse - Rent Receipt")
-    
-    p.setFont("Helvetica", 12)
-    p.drawString(100, 730, f"Receipt No: {payment.transaction_reference or payment.id}")
-    p.drawString(100, 715, f"Date generated: {timezone.now().strftime('%Y-%m-%d %H:%M')}")
-    
-    p.line(100, 700, 500, 700)
-    
-    # Details
-    p.setFont("Helvetica-Bold", 12)
-    p.drawString(100, 675, "Tenant Details:")
-    p.setFont("Helvetica", 12)
-    p.drawString(120, 655, f"Name: {payment.tenant.user.full_name}")
-    p.drawString(120, 640, f"Unit: {payment.unit.unit_number} - {payment.unit.property_obj.name}")
-    
-    p.setFont("Helvetica-Bold", 12)
-    p.drawString(100, 605, "Payment Details:")
-    p.setFont("Helvetica", 12)
-    p.drawString(120, 585, f"Amount Paid: KES {payment.amount_paid}")
-    p.drawString(120, 570, f"Rent Month: {payment.month_for.strftime('%B %Y')}")
-    p.drawString(120, 555, f"Date Paid: {payment.payment_date}")
-    p.drawString(120, 540, f"Method: {payment.get_payment_method_display()}")
-    
-    # Footer
-    p.line(100, 510, 500, 510)
-    p.setFont("Helvetica-Oblique", 10)
-    p.drawString(100, 490, "Thank you for your timely payment!")
-    
-    p.showPage()
-    p.save()
-    
-    # 3. Return as attachment
-    buffer.seek(0)
-    filename = f"Receipt_{payment.month_for.strftime('%b-%Y')}_{payment.unit.unit_number}.pdf"
-    return FileResponse(buffer, as_attachment=True, filename=filename)
+    # 2. Build PDF using Platypus for professional layout
+    try:
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+        styles = getSampleStyleSheet()
+        
+        navy_blue = colors.HexColor("#0C447C")
+        mid_blue = colors.HexColor("#185FA5")
+        border_grey = colors.HexColor("#E2E8F0")
+        elements = []
+        
+        # Header
+        header_data = [[
+            Paragraph("<font color='white' size='16'><b>Property Pulse PMS</b></font><br/><font color='white' size='10'>Official Rent Payment Receipt</font>", styles['Normal']),
+            Paragraph(f"<font color='white' size='12'><b>RECEIPT #RCP-{payment.id}</b></font>", styles['Normal'])
+        ]]
+        header_table = Table(header_data, colWidths=[3.5 * inch, 3.5 * inch])
+        header_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), navy_blue),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 20),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 20),
+            ('TOPPADDING', (0, 0), (-1, -1), 15),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 15),
+        ]))
+        elements.append(header_table)
+        
+        # Status Bar
+        pay_date_str = payment.payment_date.strftime('%d %b %Y') if payment.payment_date else 'N/A'
+        status_row = [[f"Payment Status: Approved   |   Date: {pay_date_str}"]]
+        status_table = Table(status_row, colWidths=[7 * inch])
+        status_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), mid_blue),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.white),
+            ('LEFTPADDING', (0, 0), (-1, -1), 20),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        elements.append(status_table)
+        elements.append(Spacer(1, 20))
+        
+        # Amount
+        amount_style = ParagraphStyle('AmountStyle', fontSize=28, textColor=navy_blue, alignment=1, spaceAfter=5, fontName='Helvetica-Bold')
+        elements.append(Paragraph("Amount Paid", styles['Normal']))
+        elements.append(Paragraph(f"KES {(payment.amount_paid or 0):,.2f}", amount_style))
+        period_str = payment.month_for.strftime('%B %Y') if payment.month_for else 'N/A'
+        elements.append(Paragraph(f"For Rent Period: {period_str}", styles['Normal']))
+        elements.append(Spacer(1, 30))
+        
+        # Details Grid
+        tenant_name = payment.tenant.user.full_name if payment.tenant and payment.tenant.user else 'N/A'
+        unit_str = f"Unit {payment.unit.unit_number} - {payment.unit.property_obj.name}" if payment.unit and payment.unit.property_obj else 'N/A'
+        method_str = payment.get_payment_method_display() if hasattr(payment, 'get_payment_method_display') else payment.payment_method
+        
+        details_data = [
+            [Paragraph("<b>TENANT</b>", styles['Normal']), Paragraph("<b>UNIT / PROPERTY</b>", styles['Normal'])],
+            [Paragraph(tenant_name, styles['Normal']), Paragraph(unit_str, styles['Normal'])],
+            [Spacer(1, 8), Spacer(1, 8)],
+            [Paragraph("<b>PAYMENT DATE</b>", styles['Normal']), Paragraph("<b>PAYMENT METHOD</b>", styles['Normal'])],
+            [Paragraph(pay_date_str, styles['Normal']), Paragraph(method_str, styles['Normal'])],
+        ]
+        details_table = Table(details_data, colWidths=[3.5 * inch, 3.5 * inch])
+        details_table.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ]))
+        elements.append(details_table)
+        elements.append(Spacer(1, 20))
+        
+        # M-Pesa Reference
+        ref = payment.transaction_reference or 'N/A'
+        mpesa_table = Table([[Paragraph(f"<b>M-Pesa Reference:</b> {ref}", styles['Normal'])]], colWidths=[7 * inch])
+        mpesa_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#F1F5F9")),
+            ('GRID', (0, 0), (-1, -1), 0.5, border_grey),
+            ('LEFTPADDING', (0, 0), (-1, -1), 15),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 15),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+        ]))
+        elements.append(mpesa_table)
+        elements.append(Spacer(1, 25))
+        
+        # Summary Table
+        rent_amt = (payment.unit.rent_amount or 0) if payment.unit else 0
+        paid_amt = payment.amount_paid or 0
+        summary_data = [
+            ["DESCRIPTION", "RENT (KES)", "PAID (KES)"],
+            [f"Rent — {period_str}", f"{rent_amt:,.2f}", f"{paid_amt:,.2f}"],
+            ["", "NET AMOUNT PAID", f"KES {paid_amt:,.2f}"],
+        ]
+        s_table = Table(summary_data, colWidths=[3 * inch, 2 * inch, 2 * inch])
+        s_table.setStyle(TableStyle([
+            ('LINEBELOW', (0, 0), (-1, 0), 1.5, navy_blue),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor("#F1F5F9")),
+        ]))
+        elements.append(s_table)
+        elements.append(Spacer(1, 60))
+        
+        # Footer
+        elements.append(Paragraph(
+            f"<font size='8' color='#64748b'>Thank you for using Property Pulse PMS. This is an auto-generated receipt. Generated: {timezone.now().strftime('%d %b %Y %H:%M')}</font>",
+            styles['Normal']
+        ))
+        
+        doc.build(elements)
+        buffer.seek(0)
+        
+        # Return as HTTP response — compatible with both DRF and plain Django
+        filename = f"Receipt_{period_str.replace(' ', '_')}_{payment.id}.pdf"
+        response = HttpResponse(buffer.read(), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+    except Exception as e:
+        import traceback
+        logger.error(f"PDF receipt build failed: {traceback.format_exc()}")
+        return Response({
+            'error': 'PDF Build failed',
+            'detail': str(e),
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def view_rent_receipt(request, pk):
+    """
+    Render the professional HTML receipt.
+    Supports JWT authentication via 'token' query parameter for new-tab access.
+    """
+    user = request.user
+    token = request.query_params.get('token')
+
+    # Manual JWT authentication if token is in query params
+    if not user.is_authenticated and token:
+        try:
+            jwt_auth = JWTAuthentication()
+            validated_token = jwt_auth.get_validated_token(token)
+            user = jwt_auth.get_user(validated_token)
+        except Exception:
+            return Response({'error': 'Invalid or expired token'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if not user or not user.is_authenticated:
+        return Response({'detail': 'Authentication credentials were not provided.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Permission check
+    if user.role == 'TENANT':
+        try:
+            tenant_profile = TenantProfile.objects.get(user=user)
+            payment = get_object_or_404(Payment, id=pk, tenant=tenant_profile)
+        except TenantProfile.DoesNotExist:
+            return Response({'error': 'Tenant profile not found'}, status=status.HTTP_404_NOT_FOUND)
+    else:
+        # Admin access
+        payment = get_object_or_404(Payment, id=pk)
+
+    if payment.status != 'PAID':
+        return Response({'error': 'Receipts are only available for paid records.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    context = {
+        'company_name': "Property Pulse PMS",
+        'receipt_no': payment.transaction_reference or f"RCP-{payment.id}",
+        'approval_date': payment.payment_date.strftime('%d %b %Y %H:%M') if payment.payment_date else "N/A",
+        'amount': f"{payment.amount_paid:,.2f}",
+        'tenant_name': payment.tenant.user.full_name,
+        'unit_no': payment.unit.unit_number,
+        'property_name': payment.unit.property_obj.name,
+        'period': payment.month_for.strftime('%B %Y'),
+        'mpesa_ref': payment.transaction_reference or "N/A",
+        'payment_date': payment.payment_date.strftime('%d %B %Y') if payment.payment_date else "N/A",
+        'rent_amount': f"{payment.unit.rent_amount:,.2f}",
+        'total_amount': f"{payment.amount_paid:,.2f}",
+        'qr_code_url': f"https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=RECEIPT-{payment.id}"
+    }
+
+    return render(request, 'properties/rent_receipt.html', context)
 
 
 # ==================== MAINTENANCE REQUEST VIEWS ====================
@@ -1058,10 +1209,13 @@ def export_report_pdf(request):
     Export monthly report as PDF for admin
     """
     try:
-        import io
-        from django.http import FileResponse
+        import io as _io
+        from django.http import HttpResponse
         from reportlab.lib.pagesizes import letter
-        from reportlab.pdfgen import canvas
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.units import inch
     except ImportError:
         return Response({
             'error': 'PDF generation library (reportlab) is not installed on the server. Please run "pip install reportlab" and restart the server.'
@@ -1077,54 +1231,117 @@ def export_report_pdf(request):
     except (ValueError, TypeError):
         return Response({'error': 'Invalid year or month parameter'}, status=status.HTTP_400_BAD_REQUEST)
 
-    buffer = io.BytesIO()
-    p = canvas.Canvas(buffer, pagesize=letter)
-    
-    # Header
-    p.setFont("Helvetica-Bold", 18)
-    p.drawString(100, 750, f"Property Pulse - Monthly Report ({month}/{year})")
-    p.setFont("Helvetica", 12)
-    p.drawString(100, 730, f"Generated on: {timezone.now().strftime('%Y-%m-%d %H:%M')}")
-    p.line(100, 715, 500, 715)
-    
-    # Financial Overview
-    p.setFont("Helvetica-Bold", 14)
-    p.drawString(100, 685, "1. Financial Overview")
-    p.setFont("Helvetica", 12)
-    p.drawString(120, 660, f"Total Expected Revenue: KES {report['expected_revenue']}")
-    p.drawString(120, 640, f"Total Collected Revenue: KES {report['total_revenue']}")
-    p.drawString(120, 620, f"Total Pending Revenue: KES {report['total_pending']}")
-    
-    collection_rate = report['collection_rate']
-    p.drawString(120, 600, f"Collection Rate: {collection_rate:.1f}%")
+    # Build PDF using Platypus for professional layout
+    try:
+        buffer = _io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+        styles = getSampleStyleSheet()
+        
+        # Define custom colors
+        navy_blue = colors.HexColor("#0C447C")
+        mid_blue = colors.HexColor("#185FA5")
+        border_grey = colors.HexColor("#E2E8F0")
 
-    # Occupancy Overview
-    p.setFont("Helvetica-Bold", 14)
-    p.drawString(100, 560, "2. Occupancy Overview")
-    p.setFont("Helvetica", 12)
-    p.drawString(120, 535, f"Total Units: {report['total_units']}")
-    p.drawString(120, 515, f"Occupied Units: {report['occupied_units']}")
-    p.drawString(120, 495, f"Vacant Units: {report['vacant_units']}")
-    p.drawString(120, 475, f"Occupancy Rate: {report['occupancy_rate']}%")
+        # Custom Paragraph Styles
+        title_style = ParagraphStyle('ReportTitle', fontSize=22, textColor=navy_blue, alignment=0, spaceAfter=2, fontName='Helvetica-Bold')
+        subtitle_style = ParagraphStyle('ReportSubtitle', fontSize=10, textColor=colors.HexColor("#64748B"), spaceAfter=20)
+        section_title = ParagraphStyle('SectionTitle', fontSize=14, textColor=navy_blue, fontName='Helvetica-Bold', spaceBefore=20, spaceAfter=10)
 
-    # Payment Statuses
-    p.setFont("Helvetica-Bold", 14)
-    p.drawString(100, 435, "3. Payment Breakdown")
-    p.setFont("Helvetica", 12)
-    p.drawString(120, 410, f"Paid Count: {report['paid_count']}")
-    p.drawString(120, 390, f"Pending Count: {report['pending_count']}")
-    p.drawString(120, 370, f"Overdue Count: {report['overdue_count']}")
+        elements = []
+        
+        # Header
+        elements.append(Paragraph(f"Financial Report — {report.get('report_month', 'N/A')}", title_style))
+        elements.append(Paragraph(f"Property Pulse PMS · Generated {report.get('generated_date', 'N/A')}", subtitle_style))
+        
+        # KPI Metrics Row
+        metrics = report.get('metrics', {})
+        kpi_data = [[
+            Paragraph(f"<font color='#64748B' size='8'>TOTAL COLLECTED</font><br/><font size='14'><b>KES {metrics.get('total_collected', 0):,}</b></font>", styles['Normal']),
+            Paragraph(f"<font color='#64748B' size='8'>OUTSTANDING</font><br/><font size='14'><b>KES {metrics.get('outstanding', 0):,}</b></font>", styles['Normal']),
+            Paragraph(f"<font color='#64748B' size='8'>OCCUPANCY RATE</font><br/><font size='14'><b>{metrics.get('occupancy_rate', 0)}%</b></font>", styles['Normal']),
+            Paragraph(f"<font color='#64748B' size='8'>PENDING APPROVALS</font><br/><font size='14'><b>{metrics.get('pending_approvals', 0)}</b></font>", styles['Normal']),
+        ]]
+        kpi_table = Table(kpi_data, colWidths=[1.75 * inch] * 4)
+        kpi_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#F8FAF9")),
+            ('GRID', (0, 0), (-1, -1), 1, border_grey),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 15),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 15),
+        ]))
+        elements.append(kpi_table)
+        
+        # Property Occupancy Section
+        elements.append(Paragraph("Property Occupancy Breakdown", section_title))
+        occ_data = [["PROPERTY NAME", "UNITS", "OCCUPANCY %"]]
+        for prop in report.get('properties', []):
+            occ_data.append([
+                prop.get('name', 'N/A'),
+                f"{prop.get('occupied', '?')} / {prop.get('total', '?')}",
+                f"{prop.get('occupancy', 0)}%"
+            ])
+        
+        occ_table = Table(occ_data, colWidths=[3.5 * inch, 1.75 * inch, 1.75 * inch])
+        occ_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), navy_blue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('GRID', (0, 0), (-1, -1), 0.5, border_grey),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+        ]))
+        elements.append(occ_table)
+        
+        # Recent Payment Activity Section
+        elements.append(Paragraph("Recent Payment Activity", section_title))
+        pay_data = [["TENANT", "UNIT", "AMOUNT (KES)", "DATE", "STATUS"]]
+        for pay in report.get('payments', []):
+            pay_data.append([
+                pay.get('tenant', 'N/A'),
+                pay.get('unit', 'N/A'),
+                f"{pay.get('amount', 0):,}",
+                pay.get('date', 'N/A'),
+                str(pay.get('status', 'N/A')).upper()
+            ])
+        
+        pay_table = Table(pay_data, colWidths=[1.8 * inch, 1.2 * inch, 1.5 * inch, 1.3 * inch, 1.2 * inch])
+        pay_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), mid_blue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('GRID', (0, 0), (-1, -1), 0.5, border_grey),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        elements.append(pay_table)
+        
+        # Footer
+        elements.append(Spacer(1, 40))
+        elements.append(Paragraph(
+            f"<font size='8' color='#64748b'>Property Pulse PMS - Financial Reporting System. Generated on {timezone.now().strftime('%d %b %Y %H:%M')}</font>",
+            styles['Normal']
+        ))
 
-    p.line(100, 340, 500, 340)
-    p.setFont("Helvetica-Oblique", 10)
-    p.drawString(100, 320, "End of report.")
-    
-    p.showPage()
-    p.save()
-    
-    buffer.seek(0)
-    filename = f"Property_Report_{year}_{month:02d}.pdf"
-    return FileResponse(buffer, as_attachment=True, filename=filename)
+        doc.build(elements)
+        buffer.seek(0)
+        
+        # Return as HttpResponse — compatible with DRF @api_view
+        filename = f"Financial_Report_{year}_{month:02d}.pdf"
+        response = HttpResponse(buffer.read(), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+    except Exception as e:
+        import traceback
+        logger.error(f"Report PDF build failed: {traceback.format_exc()}")
+        return Response({
+            'error': 'PDF Build failed',
+            'detail': str(e),
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
@@ -1334,96 +1551,13 @@ def tenant_pay_payment(request):
 @permission_classes([TenantOnly])
 def tenant_submit_payment(request):
     """
-    Submit a manual payment (with optional evidence).
+    Disabled: Manual payment submission is no longer supported for tenants.
+    All payments must be made via the M-Pesa STK Push flow.
     """
-    logger.debug("tenant_submit_payment: request received from user %s", request.user.id)
-    try:
-        profile = TenantProfile.objects.get(user=request.user)
-
-        raw_amount = request.data.get('amount_paid')
-        try:
-            amount_paid = Decimal(str(raw_amount))
-        except (TypeError, ValueError, InvalidOperation):
-            return Response({'error': 'Invalid amount format'}, status=status.HTTP_400_BAD_REQUEST)
-
-        month_for = request.data.get('month_for')
-        payment_method = request.data.get('payment_method', 'BANK_TRANSFER')
-        transaction_reference = request.data.get('transaction_reference', '')
-        evidence_file = request.FILES.get('evidence')
-
-        if not amount_paid or not month_for:
-            return Response({'error': 'Amount and Month are required.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Parse and normalise month_for to the first of the month
-        try:
-            month_date = timezone.datetime.strptime(month_for, '%Y-%m-%d').date().replace(day=1)
-        except ValueError:
-            return Response({'error': 'Invalid date format. Use YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Check if a payment for this month already exists
-        existing_payment = Payment.objects.filter(tenant=profile, month_for=month_date).first()
-
-        if existing_payment:
-            if existing_payment.status == 'PAID':
-                return Response(
-                    {'error': f'Payment for {month_date.strftime("%B %Y")} has already been confirmed.'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            # Update existing pending/overdue payment
-            payment = existing_payment
-            payment.amount_paid = amount_paid
-            payment.payment_method = payment_method
-            payment.transaction_reference = transaction_reference
-            payment.payment_date = timezone.now().date()
-            payment.status = 'PENDING'
-            payment.save()
-            logger.info("Payment %s updated by tenant %s", payment.id, request.user.id)
-        else:
-            if not profile.assigned_unit:
-                return Response({'error': 'No unit assigned to your profile.'}, status=status.HTTP_400_BAD_REQUEST)
-
-            payment = Payment.objects.create(
-                tenant=profile,
-                unit=profile.assigned_unit,
-                amount_paid=amount_paid,
-                month_for=month_date,
-                payment_date=timezone.now().date(),
-                payment_method=payment_method,
-                transaction_reference=transaction_reference,
-                status='PENDING'
-            )
-            logger.info("Payment %s created by tenant %s", payment.id, request.user.id)
-
-        # Attach evidence file if provided
-        if evidence_file:
-            PaymentEvidence.objects.create(
-                payment=payment,
-                uploaded_by=request.user,
-                file=evidence_file,
-                status='PENDING'
-            )
-
-        return Response({
-            'message': 'Payment submitted successfully',
-            'payment': TenantPaymentSerializer(payment).data
-        }, status=status.HTTP_201_CREATED)
-
-    except TenantProfile.DoesNotExist:
-        return Response({'error': 'Tenant profile not found'}, status=status.HTTP_404_NOT_FOUND)
-    except ValidationError as e:
-        error_messages = []
-        if hasattr(e, 'message_dict'):
-            for field, messages in e.message_dict.items():
-                error_messages.extend(messages)
-        elif hasattr(e, 'messages'):
-            error_messages = e.messages
-        else:
-            error_messages = [str(e)]
-        logger.warning("Validation error in tenant_submit_payment: %s", error_messages)
-        return Response({'error': ' '.join(error_messages)}, status=status.HTTP_400_BAD_REQUEST)
-    except Exception as e:
-        logger.exception("Unexpected error in tenant_submit_payment for user %s", request.user.id)
-        return Response({'error': 'An unexpected error occurred. Please try again.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    return Response(
+        {'error': 'Manual payment submission is disabled. Please use the "Pay with M-Pesa" option in the portal.'},
+        status=status.HTTP_400_BAD_REQUEST
+    )
 
 class TenantLeaseView(generics.RetrieveAPIView):
     permission_classes = [TenantOnly]
@@ -1529,4 +1663,188 @@ def export_payments_csv(request):
     except (ValueError, TypeError):
         return Response({'error': 'Invalid year or month'}, status=status.HTTP_400_BAD_REQUEST)
 
-    return ReportService.export_payments_to_csv(year=year, month=month)
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def export_lease_pdf(request, pk):
+    """
+    Export lease as PDF.
+    Accessible by Admins or the Tenant who owns the lease.
+    """
+    lease = get_object_or_404(Lease, pk=pk)
+    
+    # Permission check
+    if request.user.role != 'ADMIN' and lease.tenant.user != request.user:
+        return Response({'error': 'You do not have permission to access this lease document.'}, status=status.HTTP_403_FORBIDDEN)
+        
+    buffer = LeaseService.generate_lease_pdf(lease)
+    
+    from django.http import FileResponse
+    filename = f"Lease_Agreement_{lease.unit.unit_number}_{lease.tenant.user.full_name.replace(' ', '_')}.pdf"
+    
+    return FileResponse(buffer, as_attachment=True, filename=filename, content_type='application/pdf')
+
+
+# ==================== CHATBOT VIEW ====================
+
+class ChatbotAPIView(generics.GenericAPIView):
+    """
+    POST /api/chatbot/
+    { "message": "What is the occupancy?" }
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        message = request.data.get('message')
+        if not message:
+            return Response({'error': 'Message is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        chatbot = ChatbotService()
+        history = request.data.get('history', [])
+        
+        reply = chatbot.get_response(request.user, message, history)
+        
+        return Response({
+            'reply': reply,
+            'message': reply # For compatibility with old frontend
+        })
+
+
+# ==================== MPESA INTEGRATION VIEWS ====================
+
+@api_view(['POST'])
+@permission_classes([TenantOnly])
+def mpesa_stk_push_view(request):
+    """
+    Trigger an M-Pesa STK Push for the logged-in tenant.
+    POST /api/properties/tenant/payments/mpesa-stk-push/
+    { "amount": 1000, "phone_number": "254712345678", "month_for": "2026-03-01" }
+    """
+    try:
+        tenant_profile = TenantProfile.objects.get(user=request.user)
+        amount = request.data.get('amount')
+        phone_number = request.data.get('phone_number') or request.user.phone_number
+        month_for = request.data.get('month_for')
+
+        if not amount or not month_for:
+            return Response({'error': 'Amount and month_for are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not phone_number:
+            return Response({'error': 'Phone number is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Normalize month_for
+        try:
+            month_date = timezone.datetime.strptime(month_for, '%Y-%m-%d').date().replace(day=1)
+        except ValueError:
+            return Response({'error': 'Invalid date format. Use YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Prepare STK Push
+        account_ref = f"Rent-{month_date.strftime('%b%y')}"
+        trans_desc = f"Payment for {month_date.strftime('%B %Y')}"
+        
+        # In a real scenario, you'd use a real public callback URL.
+        # For sandbox, any URL works, but we'll use our own callback endpoint.
+        callback_url = f"{settings.MPESA_CALLBACK_BASE_URL}/api/properties/mpesa/callback/"
+
+        try:
+            response = MpesaClient.initiate_stk_push(
+                phone_number=phone_number,
+                amount=amount,
+                account_reference=account_ref,
+                transaction_description=trans_desc,
+                callback_url=callback_url
+            )
+            
+            # Create a PENDING payment record with the CheckoutRequestID as reference
+            # This will be updated once the callback is received.
+            Payment.objects.create(
+                tenant=tenant_profile,
+                unit=tenant_profile.assigned_unit,
+                amount_paid=amount,
+                month_for=month_date,
+                payment_date=timezone.now().date(),
+                payment_method='MOBILE_MONEY',
+                transaction_reference=response.get('CheckoutRequestID'),
+                status='PENDING'
+            )
+
+            return Response({
+                'message': 'STK Push initiated successfully. Please check your phone.',
+                'CheckoutRequestID': response.get('CheckoutRequestID')
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            logger.error(f"M-Pesa STK Push error: {str(e)}")
+            return Response({'error': f"Failed to initiate M-Pesa payment: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    except TenantProfile.DoesNotExist:
+        return Response({'error': 'Tenant profile not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+@csrf_exempt
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def mpesa_callback_view(request):
+    """
+    Receive and process M-Pesa payment callbacks from Safaricom.
+    POST /api/properties/mpesa/callback/
+    """
+    logger.info("M-Pesa Callback received: %s", request.data)
+    
+    # Safaricom sends data in a specific structure: { "Body": { "stkCallback": { ... } } }
+    body = request.data.get('Body', {})
+    stk_callback = body.get('stkCallback', {})
+    result_code = stk_callback.get('ResultCode')
+    checkout_request_id = stk_callback.get('CheckoutRequestID')
+
+    if result_code == 0:
+        # Success!
+        logger.info("M-Pesa payment successful for CheckoutRequestID: %s", checkout_request_id)
+        
+        # Find the payment record
+        payment = Payment.objects.filter(transaction_reference=checkout_request_id).first()
+        if payment:
+            # Extract M-Pesa receipt number from CallbackMetadata
+            metadata = stk_callback.get('CallbackMetadata', {}).get('Item', [])
+            receipt_number = ""
+            for item in metadata:
+                if item.get('Name') == 'MpesaReceiptNumber':
+                    receipt_number = item.get('Value')
+                    break
+            
+            payment.status = 'PAID'
+            payment.transaction_reference = receipt_number or checkout_request_id
+            payment.save()
+            
+            # Trigger notification
+            Notification.create_notification(
+                user=payment.tenant.user,
+                title="Payment Confirmed",
+                message=f"Your M-Pesa payment for {payment.month_for.strftime('%B %Y')} has been confirmed. Receipt: {payment.transaction_reference}",
+                notification_type='PAYMENT_CONFIRMED',
+                related_payment=payment
+            )
+            
+            # Notify admins
+            admins = User.objects.filter(role='ADMIN')
+            for admin in admins:
+                Notification.create_notification(
+                    user=admin,
+                    title="M-Pesa Payment Received",
+                    message=f"Tenant {payment.tenant.user.full_name} has paid KES {payment.amount_paid} via M-Pesa.",
+                    notification_type='SYSTEM_ANNOUNCEMENT',
+                    related_payment=payment
+                )
+        else:
+            logger.warning("Payment record not found for CheckoutRequestID: %s", checkout_request_id)
+    else:
+        # Failure
+        result_desc = stk_callback.get('ResultDesc', 'Unknown error')
+        logger.warning("M-Pesa payment failed for CheckoutRequestID: %s. Code: %s, Desc: %s", 
+                       checkout_request_id, result_code, result_desc)
+        
+        payment = Payment.objects.filter(transaction_reference=checkout_request_id).first()
+        if payment:
+            payment.status = 'FAILED'
+            payment.save()
+
+    return Response({"ResultCode": 0, "ResultDesc": "Accepted"})

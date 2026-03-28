@@ -267,6 +267,11 @@ class Payment(models.Model):
         ('ONLINE', 'Online Payment'),
     ]
     
+    PAYMENT_CATEGORY_CHOICES = [
+        ('Rent', 'Rent'),
+        ('Security Deposit', 'Security Deposit'),
+    ]
+    
     tenant = models.ForeignKey(
         TenantProfile, 
         on_delete=models.CASCADE, 
@@ -294,6 +299,11 @@ class Payment(models.Model):
         choices=PAYMENT_METHOD_CHOICES,
         default='BANK_TRANSFER'
     )
+    payment_category = models.CharField(
+        max_length=50,
+        choices=PAYMENT_CATEGORY_CHOICES,
+        default='Rent'
+    )
     status = models.CharField(
         max_length=10, 
         choices=PAYMENT_STATUS_CHOICES,
@@ -318,7 +328,6 @@ class Payment(models.Model):
         db_table = 'payments'
         verbose_name = 'Payment'
         verbose_name_plural = 'Payments'
-        unique_together = ['tenant', 'unit', 'month_for']
         ordering = ['-payment_date']
 
     def __str__(self):
@@ -326,22 +335,8 @@ class Payment(models.Model):
 
     def clean(self):
         """Validate payment logic"""
-        # Validate amount matches unit rent (Optional: could be moved to a warning or just removed)
-        # We allow flexible payments now to prevent save() failures during admin approval
+        # We allow multiple payments for the same month (e.g. partial payments, deposit + rent) 
         pass
-        
-        # Prevent duplicate payment for same month
-        existing_payment = Payment.objects.filter(
-            tenant=self.tenant,
-            unit=self.unit,
-            month_for=self.month_for,
-            status='PAID'
-        ).exclude(id=self.id if self.id else None).first()
-        
-        if existing_payment:
-            raise ValidationError({
-                'month_for': f'Payment for {self.month_for.strftime("%B %Y")} has already been made for this unit.'
-            })
 
     def save(self, *args, **kwargs):
         self.clean()

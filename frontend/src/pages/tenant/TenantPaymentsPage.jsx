@@ -3,10 +3,9 @@ import {
   Box, Typography, Table, TableBody, TableCell, TableContainer, TableHead,
   TableRow, Paper, Chip, Button, Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Snackbar, Alert, IconButton, Tooltip, MenuItem, Grid, InputAdornment,
-  Stepper, Step, StepLabel, Divider, FormControl, InputLabel, Select, CircularProgress
+  FormControl, InputLabel, Select, CircularProgress
 } from '@mui/material';
 import {
-  UploadFile as UploadFileIcon,
   Close as CloseIcon,
   Download as DownloadIcon,
   Payment as PaymentIcon,
@@ -32,16 +31,13 @@ export default function TenantPaymentsPage() {
   
   // Dialog states
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [dialogMode, setDialogMode] = useState('UPLOAD'); // 'UPLOAD' or 'PAY'
-  const [activeStep, setActiveStep] = useState(0); 
   const [selectedPayment, setSelectedPayment] = useState(null);
   
   // Form states
   const [amountPaid, setAmountPaid] = useState('');
   const [monthFor, setMonthFor] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('MOBILE_MONEY');
-  const [transactionRef, setTransactionRef] = useState('');
-  const [evidenceFile, setEvidenceFile] = useState(null);
+  const [mpesaPhone, setMpesaPhone] = useState('');
   
   const [uploading, setUploading] = useState(false);
   const [snack, setSnack] = useState({ open: false, message: '', severity: 'success' });
@@ -69,75 +65,78 @@ export default function TenantPaymentsPage() {
     });
   }, [payments, filters]);
 
-  const handleOpenUpload = (payment) => {
-    setSelectedPayment(payment);
-    setDialogMode('UPLOAD');
-    setEvidenceFile(null);
-    setDialogOpen(true);
-  };
-
   const handleOpenPay = async () => {
     setSelectedPayment(null);
-    setDialogMode('PAY');
-    setActiveStep(0);
+    setDialogOpen(true);
     
     try {
       setUploading(true);
       const profileRes = await tenantService.getFullProfile();
       const unit = profileRes.data?.unit_info;
+      const phone = profileRes.data?.phone_number;
       if (unit) setAmountPaid(unit.rent_amount || '');
+      if (phone) setMpesaPhone(phone);
     } catch (e) {
       console.error(e);
     } finally {
       setUploading(false);
     }
 
+    // Auto-month selection: next unpaid month
     const now = new Date();
-    setMonthFor(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`);
-    setPaymentMethod('BANK_TRANSFER');
-    setTransactionRef('');
-    setEvidenceFile(null);
-    setDialogOpen(true);
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    
+    // Find all paid months
+    const paidMonths = payments
+      .filter(p => p.status === 'PAID')
+      .map(p => new Date(p.month_for))
+      .sort((a, b) => b - a); // Descending
+
+    let targetMonth = currentMonthStart;
+    if (paidMonths.length > 0) {
+      const lastPaid = paidMonths[0];
+      if (lastPaid >= currentMonthStart) {
+        // Next month
+        targetMonth = new Date(lastPaid.getFullYear(), lastPaid.getMonth() + 1, 1);
+      }
+    }
+
+    setMonthFor(`${targetMonth.getFullYear()}-${String(targetMonth.getMonth() + 1).padStart(2, '0')}-01`);
+    setPaymentMethod('MOBILE_MONEY');
   };
 
-  const nextStep = () => setActiveStep(prev => prev + 1);
-  const prevStep = () => setActiveStep(prev => prev - 1);
+  const handleMpesaPayment = async () => {
+    if (!amountPaid || !monthFor || !mpesaPhone) {
+      setSnack({ open: true, message: 'Please fill in all details', severity: 'warning' });
+      return;
+    }
 
-  const handleUploadEvidenceOnly = async () => {
-    if (!evidenceFile || !selectedPayment) return;
+    // Normalize phone number (handle 07..., +254..., or 7...)
+    let normalizedPhone = mpesaPhone.replace(/\s+/g, '').replace('+', '');
+    if (normalizedPhone.startsWith('0')) {
+      normalizedPhone = '254' + normalizedPhone.substring(1);
+    } else if (normalizedPhone.length === 9 && normalizedPhone.startsWith('7')) {
+      normalizedPhone = '254' + normalizedPhone;
+    } else if (normalizedPhone.startsWith('254')) {
+      // already correct format
+    } else {
+      setSnack({ open: true, message: 'Invalid phone number format. Please enter a valid Safaricom number.', severity: 'error' });
+      return;
+    }
+
     setUploading(true);
     try {
-      const formData = new FormData();
-      formData.append('payment', selectedPayment.id);
-      formData.append('file', evidenceFile);
-      await tenantService.uploadPaymentEvidence(formData);
-      setSnack({ open: true, message: 'Evidence uploaded successfully!', severity: 'success' });
-      setDialogOpen(false); 
-      fetchPayments();
-    } catch (e) {
-      setSnack({ open: true, message: getApiErrorMessage(e, 'Upload failed'), severity: 'error' });
-    } finally { setUploading(false); }
-  };
-
-  const handleSubmitNewPayment = async () => {
-    if (!amountPaid || !monthFor) return;
-    setUploading(true);
-    try {
-      const formData = new FormData();
-      // Ensure amount is sent as a string with 2 decimal places to match backend expectation
-      const formattedAmount = parseFloat(amountPaid).toFixed(2);
-      formData.append('amount_paid', formattedAmount);
-      formData.append('month_for', monthFor);
-      formData.append('payment_method', paymentMethod);
-      formData.append('transaction_reference', transactionRef);
-      if (evidenceFile) formData.append('evidence', evidenceFile);
-      
-      await tenantService.submitPayment(formData);
-      setSnack({ open: true, message: 'Payment submitted for verification!', severity: 'success' });
+      const data = {
+        amount: amountPaid,
+        month_for: monthFor,
+        phone_number: normalizedPhone
+      };
+      const res = await tenantService.initiateMpesaStkPush(data);
+      setSnack({ open: true, message: res.data.message || 'Check your phone for the M-Pesa prompt!', severity: 'success' });
       setDialogOpen(false);
-      fetchPayments();
+      setTimeout(fetchPayments, 5000);
     } catch (e) {
-      setSnack({ open: true, message: getApiErrorMessage(e, 'Submission failed'), severity: 'error' });
+      setSnack({ open: true, message: getApiErrorMessage(e, 'M-Pesa payment failed'), severity: 'error' });
     } finally { setUploading(false); }
   };
 
@@ -147,13 +146,13 @@ export default function TenantPaymentsPage() {
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      const monthStr = payment.month_for_formatted ? payment.month_for_formatted.replace(' ', '_') : 'Receipt';
-      link.setAttribute('download', `Receipt_${monthStr}.pdf`);
+      link.setAttribute('download', `Receipt_${payment.id}.pdf`);
       document.body.appendChild(link);
       link.click();
       link.parentNode.removeChild(link);
     } catch (error) {
-      setSnack({ open: true, message: 'Receipt download failed. Only PAID payments have receipts.', severity: 'error' });
+      console.error('Download failed:', error);
+      alert('Failed to download receipt PDF.');
     }
   };
 
@@ -227,7 +226,6 @@ export default function TenantPaymentsPage() {
                 <TableCell sx={{ fontWeight: 700 }}>Month</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Due Status</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Payment Method</TableCell>
-                <TableCell sx={{ fontWeight: 700 }} align="center">Proof</TableCell>
                 <TableCell sx={{ fontWeight: 700 }} align="center">Actions</TableCell>
               </TableRow>
             </TableHead>
@@ -244,29 +242,13 @@ export default function TenantPaymentsPage() {
                       sx={{ fontWeight: 800, borderRadius: 1.5, fontSize: '0.7rem' }}
                     />
                   </TableCell>
-                  <TableCell>{p.payment_method || '—'}</TableCell>
-                  <TableCell align="center">
-                    {p.evidence && p.evidence.length > 0 ? (
-                      <Tooltip title="View Proof">
-                         <IconButton size="small" onClick={() => window.open(p.evidence[p.evidence.length-1].file_url, '_blank')}>
-                           <CheckCircleIcon color="success" fontSize="small" />
-                         </IconButton>
-                      </Tooltip>
-                    ) : '—'}
-                  </TableCell>
+                  <TableCell>{p.payment_method === 'MOBILE_MONEY' ? 'M-Pesa' : p.payment_method || '—'}</TableCell>
                   <TableCell align="center">
                     <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center' }}>
                       {p.status === 'PAID' && (
                         <Tooltip title="Download Receipt">
                           <IconButton size="small" onClick={() => handleDownloadReceipt(p)} sx={{ bgcolor: '#f0fdf4', color: '#16a34a' }}>
                             <DownloadIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      )}
-                      {p.status !== 'PAID' && (
-                        <Tooltip title="Upload Proof">
-                          <IconButton size="small" onClick={() => handleOpenUpload(p)} sx={{ bgcolor: '#eff6ff', color: '#2563eb' }}>
-                            <UploadFileIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
                       )}
@@ -283,141 +265,64 @@ export default function TenantPaymentsPage() {
         <DialogTitle sx={{ px: 3, py: 2.5 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <Typography variant="h6" fontWeight={800}>
-              {dialogMode === 'PAY' ? 'Submit New Payment' : 'Upload Proof of Payment'}
+              M-Pesa Payment
             </Typography>
             <IconButton onClick={() => setDialogOpen(false)} size="small"><CloseIcon /></IconButton>
           </Box>
         </DialogTitle>
-        <DialogContent sx={{ p: 0 }}>
-          {dialogMode === 'PAY' && (
-            <Stepper activeStep={activeStep} sx={{ px: 3, py: 3, bgcolor: '#f8fafc' }}>
-              <Step><StepLabel>Details</StepLabel></Step>
-              <Step><StepLabel>Proof</StepLabel></Step>
-              <Step><StepLabel>Confirm</StepLabel></Step>
-            </Stepper>
-          )}
-          
-          <Box sx={{ p: 3 }}>
-            {dialogMode === 'PAY' ? (
-              <>
-                {activeStep === 0 && (
-                  <Grid container spacing={2.5}>
-                    <Grid item xs={12}>
-                      <Alert severity="info" sx={{ mb: 1 }}>Enter the details of your payment below.</Alert>
-                      {summary?.rent_amount && Number(amountPaid) !== Number(summary.rent_amount) && (
-                        <Alert severity="warning" sx={{ mb: 2 }}>
-                          Note: Your monthly rent is <strong>KES {Number(summary.rent_amount).toLocaleString()}</strong>. Submitting a different amount may cause verification issues.
-                        </Alert>
-                      )}
-                    </Grid>
-                    <Grid item xs={12} sm={6}>
-                      <TextField 
-                        fullWidth 
-                        label="Amount Paid (KES)" 
-                        type="number" 
-                        value={amountPaid} 
-                        onChange={(e) => setAmountPaid(e.target.value)}
-                        helperText={summary?.rent_amount ? `Expected monthly rent: KES ${Number(summary.rent_amount).toLocaleString()}` : ''}
-                      />
-                    </Grid>
-                    <Grid item xs={12} sm={6}>
-                      <TextField fullWidth label="Target Month" type="date" InputLabelProps={{ shrink: true }} value={monthFor} onChange={(e) => setMonthFor(e.target.value)} />
-                    </Grid>
-                    <Grid item xs={12} sm={6}>
-                      <TextField fullWidth select label="Payment Method" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
-                        <MenuItem value="MOBILE_MONEY">M-Pesa / Mobile Money</MenuItem>
-                        <MenuItem value="BANK_TRANSFER">Bank Transfer</MenuItem>
-                        <MenuItem value="CASH">Cash</MenuItem>
-                      </TextField>
-                    </Grid>
-                    <Grid item xs={12} sm={6}>
-                      <TextField fullWidth label="Transaction Ref" value={transactionRef} onChange={(e) => setTransactionRef(e.target.value)} placeholder="e.g. QKX1234567" />
-                    </Grid>
-                  </Grid>
-                )}
-
-                {activeStep === 1 && (
-                  <Box sx={{ textAlign: 'center', py: 2 }}>
-                    <Typography variant="subtitle1" fontWeight={700} gutterBottom>Attach Payment Receipt</Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                      Adding a photo of your receipt helps us verify your payment faster.
-                    </Typography>
-                    <Button
-                      variant="outlined"
-                      component="label"
-                      fullWidth
-                      startIcon={<UploadFileIcon />}
-                      sx={{ py: 2, borderStyle: 'dashed', borderRadius: 3 }}
-                    >
-                      {evidenceFile ? evidenceFile.name : 'Choose File (Image or PDF)'}
-                      <input type="file" hidden accept="image/*,.pdf" onChange={(e) => setEvidenceFile(e.target.files[0])} />
-                    </Button>
-                  </Box>
-                )}
-
-                {activeStep === 2 && (
-                  <Box>
-                    <Typography variant="subtitle1" fontWeight={700} gutterBottom>Review & Submit</Typography>
-                    <Paper sx={{ p: 2, bgcolor: '#f1f5f9', borderRadius: 2 }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                        <Typography variant="body2" color="text.secondary">Amount:</Typography>
-                        <Typography variant="body2" fontWeight={700}>KES {Number(amountPaid).toLocaleString()}</Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                        <Typography variant="body2" color="text.secondary">Method:</Typography>
-                        <Typography variant="body2" fontWeight={700}>{paymentMethod}</Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                        <Typography variant="body2" color="text.secondary">Reference:</Typography>
-                        <Typography variant="body2" fontWeight={700}>{transactionRef || 'N/A'}</Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="body2" color="text.secondary">Proof Attached:</Typography>
-                        <Typography variant="body2" fontWeight={700} color={evidenceFile ? 'success.main' : 'text.secondary'}>
-                          {evidenceFile ? 'Yes' : 'No'}
-                        </Typography>
-                      </Box>
-                    </Paper>
-                  </Box>
-                )}
-              </>
-            ) : (
-              <Box sx={{ textAlign: 'center', py: 1 }}>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                  Upload a clear image or PDF of your payment evidence.
-                </Typography>
-                <Button variant="outlined" component="label" fullWidth startIcon={<UploadFileIcon />} sx={{ py: 2, borderStyle: 'dashed', borderRadius: 3 }}>
-                  {evidenceFile ? evidenceFile.name : 'Choose Evidence File'}
-                  <input type="file" hidden accept="image/*,.pdf" onChange={(e) => setEvidenceFile(e.target.files[0])} />
-                </Button>
-              </Box>
-            )}
+        <DialogContent sx={{ px: 3, pb: 2 }}>
+          <Box sx={{ py: 2 }}>
+            <Grid container spacing={2.5}>
+              <Grid item xs={12}>
+                <Alert severity="info" sx={{ mb: 1.5 }}>
+                  The prompt will be sent to the number below. Ensure you have the required balance in your M-Pesa.
+                </Alert>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField 
+                  fullWidth 
+                  label="Amount (KES)" 
+                  type="number" 
+                  value={amountPaid} 
+                  onChange={(e) => setAmountPaid(e.target.value)}
+                  helperText={summary?.rent_amount ? `Monthly rent: KES ${Number(summary.rent_amount).toLocaleString()}` : ''}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField 
+                  fullWidth 
+                  label="Target Month" 
+                  type="month" 
+                  InputLabelProps={{ shrink: true }} 
+                  value={monthFor.substring(0, 7)} 
+                  onChange={(e) => setMonthFor(e.target.value ? `${e.target.value}-01` : '')} 
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <TextField 
+                  fullWidth 
+                  label="M-Pesa Phone Number" 
+                  value={mpesaPhone} 
+                  onChange={(e) => setMpesaPhone(e.target.value)} 
+                  placeholder="e.g. 0712345678 or 254712345678" 
+                  helperText="Enter your Safaricom number to receive the STK prompt."
+                />
+              </Grid>
+            </Grid>
           </Box>
         </DialogContent>
         <DialogActions sx={{ p: 3, bgcolor: '#f8fafc' }}>
-          {dialogMode === 'PAY' ? (
-            <>
-              {activeStep === 0 ? (
-                <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
-              ) : (
-                <Button onClick={prevStep}>Back</Button>
-              )}
-              {activeStep < 2 ? (
-                <Button variant="contained" onClick={nextStep} disabled={activeStep === 0 && (!amountPaid || !monthFor)}>Continue</Button>
-              ) : (
-                <Button variant="contained" onClick={handleSubmitNewPayment} disabled={uploading}>
-                  {uploading ? <CircularProgress size={24} /> : 'Submit Payment'}
-                </Button>
-              )}
-            </>
-          ) : (
-            <>
-              <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button variant="contained" onClick={handleUploadEvidenceOnly} disabled={uploading || !evidenceFile}>
-                {uploading ? <CircularProgress size={24} /> : 'Upload Proof'}
-              </Button>
-            </>
-          )}
+          <Button onClick={() => setDialogOpen(false)} color="inherit">Cancel</Button>
+          <Button 
+            variant="contained" 
+            color="secondary" 
+            onClick={handleMpesaPayment} 
+            disabled={uploading || !amountPaid || !monthFor || !mpesaPhone}
+            startIcon={uploading ? <CircularProgress size={20} color="inherit" /> : <PaymentIcon />}
+            sx={{ px: 4, py: 1, borderRadius: 2, fontWeight: 700 }}
+          >
+            {uploading ? 'Processing...' : 'Pay with M-Pesa'}
+          </Button>
         </DialogActions>
       </Dialog>
 

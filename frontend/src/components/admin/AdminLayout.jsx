@@ -17,6 +17,7 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import useAuth from '../../hooks/useAuth';
 import PageTransition from '../common/PageTransition';
+import ChatbotFAB from '../common/ChatbotFAB';
 
 const FULL_WIDTH = 240;
 const RAIL_WIDTH = 64;
@@ -128,6 +129,7 @@ export default function AdminLayout() {
             </PageTransition>
           </Box>
         </Box>
+        <ChatbotFAB targetPath="/admin/chatbot" />
       </Box>
     </Box>
   );
