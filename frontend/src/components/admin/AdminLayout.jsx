@@ -27,7 +27,6 @@ const navItems = [
   { label: 'Units', icon: <ApartmentIcon />, path: '/admin/units' },
   { label: 'Tenants', icon: <PeopleIcon />, path: '/admin/tenants' },
   { label: 'Payments', icon: <PaymentsIcon />, path: '/admin/payments' },
-  { label: 'Payment Evidence', icon: <ReceiptIcon />, path: '/admin/payment-evidence' },
   { label: 'Reports', icon: <BarChartIcon />, path: '/admin/reports' },
   { label: 'Maintenance', icon: <BuildIcon />, path: '/admin/maintenance' },
   { label: 'Chatbot', icon: <ChatIcon />, path: '/admin/chatbot' },

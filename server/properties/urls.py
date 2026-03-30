@@ -127,6 +127,12 @@ urlpatterns = [
     # M-Pesa Integration
     path('tenant/payments/mpesa-stk-push/', views.mpesa_stk_push_view, name='mpesa-stk-push'),
     path('mpesa/callback/', views.mpesa_callback_view, name='mpesa-callback'),
+
+    # Admin Announcements & Leases
+    path('admin/announcements/broadcast/', views.post_announcement_view, name='admin-broadcast-announcement'),
+    path('admin/leases/expiring/', views.expiring_leases_view, name='admin-expiring-leases'),
+    path('admin/reminders/send/', views.send_rent_reminders_view, name='admin-send-rent-reminders'),
+    path('admin/tenants/<int:tenant_id>/export-ledger/', views.export_tenant_ledger_view, name='admin-export-tenant-ledger'),
 ]
 
 

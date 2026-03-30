@@ -35,6 +35,10 @@ const adminService = {
       link.parentNode.removeChild(link);
       window.URL.revokeObjectURL(url);
     }),
+  broadcastAnnouncement: (data) => api.post('/admin/announcements/broadcast/', data),
+  getExpiringLeases: (days = 30) => api.get('/admin/leases/expiring/', { params: { days } }),
+  sendRentReminders: () => api.post('/admin/reminders/send/'),
+  exportTenantLedger: (tenantId) => api.get(`/admin/tenants/${tenantId}/export-ledger/`, { responseType: 'blob' }),
 };
 
 export default adminService;

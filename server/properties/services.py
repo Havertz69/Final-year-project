@@ -147,6 +147,65 @@ class PaymentService:
         }
     
     @staticmethod
+    def ensure_monthly_payments(year, month):
+        """
+        Ensure all active tenants with assigned units have a payment record for the given month.
+        Creates PENDING records if they don't exist.
+        """
+        month_date = date(year, month, 1)
+        active_tenants = TenantProfile.objects.filter(assigned_unit__isnull=False)
+        
+        created_count = 0
+        for tenant in active_tenants:
+            # Check if any payment exists for this month (excluding FAILED/REJECTED if we want to allow retries)
+            existing = Payment.objects.filter(
+                tenant=tenant,
+                month_for=month_date
+            ).exclude(status__in=['FAILED']).exists()
+            
+            if not existing:
+                Payment.objects.create(
+                    tenant=tenant,
+                    unit=tenant.assigned_unit,
+                    amount_paid=tenant.assigned_unit.rent_amount,
+                    month_for=month_date,
+                    status='PENDING',
+                    payment_method='MOBILE_MONEY'
+                )
+                created_count += 1
+        
+        return created_count
+
+    @staticmethod
+    def send_rent_reminders():
+        """
+        Send notifications to all tenants who have PENDING or OVERDUE payments.
+        """
+        from .models import Payment, Notification
+        from datetime import date
+        
+        # Remind for ALL unpaid payments in the past/present
+        unpaid_payments = Payment.objects.filter(
+            status__in=['PENDING', 'OVERDUE'],
+            month_for__lte=date.today()
+        ).select_related('tenant__user')
+        
+        sent_count = 0
+        
+        for payment in unpaid_payments:
+            month_name = payment.month_for.strftime('%B %Y') if payment.month_for else "the specified period"
+            Notification.create_notification(
+                user=payment.tenant.user,
+                title=f"Rent Reminder: {month_name}",
+                message=f"Hello {payment.tenant.user.full_name}, your rent for {month_name} is still unpaid. Please make a payment to avoid any inconveniences.",
+                notification_type='PAYMENT_DUE',
+                related_payment=payment
+            )
+            sent_count += 1
+            
+        return sent_count
+    
+    @staticmethod
     def get_admin_payment_stats(property_id=None, month=None, year=None):
         """Get payment statistics for admin dashboard"""
         queryset = Payment.objects.all()
@@ -262,6 +321,9 @@ class ReportService:
         """Generate monthly financial report"""
         from .models import Unit, TenantProfile, Property
         
+        # Proactively ensure all tenants have a payment record for this month
+        PaymentService.ensure_monthly_payments(year, month)
+        
         # Occupancy stats
         total_units = Unit.objects.count()
         occupied_units_qs = Unit.objects.filter(is_occupied=True)
@@ -347,8 +409,8 @@ class ReportService:
             'overdue_count': payments.filter(status='OVERDUE').count(),
             'total_tenants': TenantProfile.objects.count(),
             'collection_rate': round(
-                (payments.filter(status='PAID').count() / payments.count() * 100) 
-                if payments.count() > 0 else 0, 2
+                (float(total_revenue) / float(expected_revenue) * 100) 
+                if expected_revenue > 0 else 0, 2
             ),
             'total_units': total_units,
             'occupied_units': occupied_units,
@@ -597,6 +659,99 @@ class LeaseService:
             ('FONTSIZE', (0, 1), (-1, 1), 9),
         ]))
         elements.append(ts)
+        
+        doc.build(elements)
+        buffer.seek(0)
+        return buffer
+
+    @staticmethod
+    def get_upcoming_expirations(days=30):
+        """
+        Get leases expiring within the specified number of days.
+        """
+        from datetime import date, timedelta
+        today = date.today()
+        upcoming = today + timedelta(days=days)
+        
+        return Lease.objects.filter(
+            end_date__gte=today,
+            end_date__lte=upcoming
+        ).select_related('tenant__user', 'unit__property_obj').order_by('end_date')
+
+    @staticmethod
+    def generate_ledger_pdf(tenant_id):
+        """
+        Generate a professional Statement of Account (Ledger) for a tenant.
+        """
+        from .models import TenantProfile, Payment
+        from django.conf import settings
+        import io
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        
+        tenant = TenantProfile.objects.select_related('user', 'assigned_unit__property_obj').get(id=tenant_id)
+        payments = Payment.objects.filter(tenant=tenant).order_by('-month_for', '-payment_date')
+        
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+        elements = []
+        styles = getSampleStyleSheet()
+        
+        # Custom Styles
+        title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=20, spaceAfter=20, textColor=colors.HexColor("#1e293b"))
+        header_style = ParagraphStyle('HeaderStyle', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor("#64748b"))
+        
+        # Header
+        elements.append(Paragraph("Statement of Account", title_style))
+        elements.append(Paragraph(f"Generated on: {date.today().strftime('%B %d, %Y')}", header_style))
+        elements.append(Spacer(1, 20))
+        
+        # Tenant Info
+        tenant_info = [
+            [f"Tenant Name: {tenant.user.full_name}", f"Property: {tenant.assigned_unit.property_obj.name}" if tenant.assigned_unit else "Property: N/A"],
+            [f"Email: {tenant.user.email}", f"Unit: {tenant.assigned_unit.unit_number}" if tenant.assigned_unit else "Unit: N/A"],
+        ]
+        info_table = Table(tenant_info, colWidths=[3 * inch, 3 * inch])
+        info_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        elements.append(info_table)
+        elements.append(Spacer(1, 30))
+        
+        # Payment Table
+        data = [['Period', 'Status', 'Method', 'Reference', 'Amount Paid (KES)']]
+        for p in payments:
+            data.append([
+                p.month_for.strftime('%b %Y') if p.month_for else '-',
+                p.status,
+                p.get_payment_method_display() if p.payment_method else '-',
+                p.transaction_reference or '-',
+                f"{p.amount_paid:,.2f}"
+            ])
+            
+        table = Table(data, colWidths=[1.2*inch, 1*inch, 1.3*inch, 1.8*inch, 1.5*inch])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#3b82f6")),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+        elements.append(table)
+        
+        # Summary footer
+        total_paid = sum(p.amount_paid for p in payments if p.status == 'PAID')
+        elements.append(Spacer(1, 40))
+        elements.append(Paragraph(f"<b>Total Lifetime Payments: KES {total_paid:,.2f}</b>", styles['Normal']))
         
         doc.build(elements)
         buffer.seek(0)

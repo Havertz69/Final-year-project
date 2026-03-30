@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 from django.shortcuts import get_object_or_404, render
 from django.db.models import Sum, Count, Q, F
 from django.utils import timezone
-from django.http import FileResponse
+from django.http import FileResponse, HttpResponse
 import io
 from datetime import date, timedelta
 from rest_framework_simplejwt.authentication import JWTAuthentication
@@ -960,24 +960,56 @@ def tenant_update_profile(request):
 @permission_classes([TenantOnly])
 def tenant_change_password(request):
     """
-    Change tenant password
+    Change tenant password with validation and improved error reporting.
+    POST /api/my-profile/change-password/
     """
     try:
         old_password = request.data.get('old_password')
         new_password = request.data.get('new_password')
 
         if not old_password or not new_password:
-            return Response({'error': 'Old and new passwords are required'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {'error': 'Both current and new passwords are required.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         user = request.user
+        
+        # 1. Verify old password
         if not user.check_password(old_password):
-            return Response({'error': 'Old password is incorrect'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {'error': 'The current password you entered is incorrect.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
+        # 2. Validate new password (optional but recommended)
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        try:
+            validate_password(new_password, user)
+        except DjangoValidationError as e:
+            return Response(
+                {'error': 'Password validation failed', 'details': list(e.messages)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 3. Update password
         user.set_password(new_password)
         user.save()
-        return Response({'message': 'Password changed successfully'})
+        
+        # 4. Optional: Update session auth hash (prevents logout in session-based auth)
+        from django.contrib.auth import update_session_auth_hash
+        update_session_auth_hash(request, user)
+
+        logger.info(f"Password successfully changed for user: {user.email}")
+        return Response({'message': 'Your password has been updated successfully.'})
+
     except Exception as e:
-        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        logger.error(f"Error in tenant_change_password: {str(e)}", exc_info=True)
+        return Response(
+            {'error': 'An internal server error occurred while updating your password.'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 
 @api_view(['GET'])
@@ -1371,22 +1403,42 @@ def dashboard_summary(request):
     report = ReportService.generate_monthly_report(today.year, today.month)
     
     payment_stats = {
-        'total_income': report['total_revenue'],
-        'expected_income': report['expected_revenue'],
+        'total_income': float(report['total_revenue']),
+        'expected_income': float(report['expected_revenue']),
+        'collection_rate': float(report['collection_rate']),
         'paid_count': report['paid_count'],
         'pending_count': report['pending_count'],
         'overdue_count': report['overdue_count'],
-        'collection_rate': report['collection_rate']
+        'total_outstanding': float(report['total_pending']),
     }
 
-    # 3. Revenue Trends (Last 6 months)
-    revenue_trends_data = ReportService.get_revenue_trends(months=6)
+    # 3. Expiring Leases (30 days)
+    expiring_leases = LeaseService.get_upcoming_expirations(days=30)
+
+    # 4. Emergency Maintenance Alerts
+    emergency_maintenance = MaintenanceRequest.objects.filter(
+        status__in=['PENDING', 'IN_PROGRESS'],
+        priority__in=['HIGH', 'EMERGENCY']
+    ).count()
 
     return Response({
         'role': 'ADMIN',
         'property_stats': property_stats,
         'payment_stats': payment_stats,
-        'revenue_trends': revenue_trends_data
+        'revenue_trends': ReportService.get_revenue_trends(months=6),
+        'emergency_maintenance_count': emergency_maintenance,
+        'lease_stats': {
+            'expiring_count': expiring_leases.count(),
+            'upcoming_expirations': [
+                {
+                    'id': l.id,
+                    'tenant_name': l.tenant.user.full_name,
+                    'unit_number': l.unit.unit_number,
+                    'end_date': l.end_date,
+                    'days_left': l.days_remaining
+                } for l in expiring_leases[:5]
+            ]
+        }
     })
 
 
@@ -1754,18 +1806,30 @@ def mpesa_stk_push_view(request):
                 callback_url=callback_url
             )
             
-            # Create a PENDING payment record with the CheckoutRequestID as reference
-            # This will be updated once the callback is received.
-            Payment.objects.create(
+            # Use an existing PENDING or OVERDUE payment record if it exists for this month
+            # This avoids duplicates now that we proactively create records.
+            payment = Payment.objects.filter(
                 tenant=tenant_profile,
-                unit=tenant_profile.assigned_unit,
-                amount_paid=amount,
-                month_for=month_date,
-                payment_date=timezone.now().date(),
-                payment_method='MOBILE_MONEY',
-                transaction_reference=response.get('CheckoutRequestID'),
-                status='PENDING'
-            )
+                month_for=month_date
+            ).exclude(status='PAID').first()
+
+            if payment:
+                payment.amount_paid = amount
+                payment.transaction_reference = response.get('CheckoutRequestID')
+                payment.status = 'PENDING' # Reset to pending for the callback flow
+                payment.payment_method = 'MOBILE_MONEY'
+                payment.save()
+            else:
+                Payment.objects.create(
+                    tenant=tenant_profile,
+                    unit=tenant_profile.assigned_unit,
+                    amount_paid=amount,
+                    month_for=month_date,
+                    payment_date=timezone.now().date(),
+                    payment_method='MOBILE_MONEY',
+                    transaction_reference=response.get('CheckoutRequestID'),
+                    status='PENDING'
+                )
 
             return Response({
                 'message': 'STK Push initiated successfully. Please check your phone.',
@@ -1848,3 +1912,99 @@ def mpesa_callback_view(request):
             payment.save()
 
     return Response({"ResultCode": 0, "ResultDesc": "Accepted"})
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def post_announcement_view(request):
+    """
+    Broadcast a notification to all tenants.
+    """
+    if request.user.role != 'ADMIN':
+        return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
+        
+    title = request.data.get('title')
+    message = request.data.get('message')
+    
+    if not title or not message:
+        return Response({'error': 'Title and message are required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+    tenants = TenantProfile.objects.all().select_related('user')
+    created_count = 0
+    
+    for tenant in tenants:
+        Notification.create_notification(
+            user=tenant.user,
+            title=title,
+            message=message,
+            notification_type='SYSTEM_ANNOUNCEMENT'
+        )
+        created_count += 1
+        
+    return Response({
+        'message': f'Announcement broadcast to {created_count} tenants successfully.'
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def expiring_leases_view(request):
+    """
+    Get leases expiring soon for admin visibility.
+    """
+    if request.user.role != 'ADMIN':
+        return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
+        
+    days = int(request.query_params.get('days', 30))
+    leases = LeaseService.get_upcoming_expirations(days=days)
+    
+    return Response([
+        {
+            'id': l.id,
+            'tenant_name': l.tenant.user.full_name,
+            'tenant_email': l.tenant.user.email,
+            'unit_number': l.unit.unit_number,
+            'property_name': l.unit.property_obj.name,
+            'rent_amount': float(l.rent_amount),
+            'start_date': l.start_date,
+            'end_date': l.end_date,
+            'days_left': l.days_remaining
+        } for l in leases
+    ])
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def send_rent_reminders_view(request):
+    """
+    Send rent reminders to all unpaid tenants for the current month.
+    """
+    if request.user.role != 'ADMIN':
+        return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
+        
+    sent_count = PaymentService.send_rent_reminders()
+    
+    return Response({
+        'message': f'Rent reminders sent to {sent_count} tenants.'
+    })
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def export_tenant_ledger_view(request, tenant_id):
+    """
+    Export a professional PDF Statement of Account for a specific tenant.
+    """
+    if request.user.role != 'ADMIN':
+        return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
+        
+    try:
+        buffer = LeaseService.generate_ledger_pdf(tenant_id)
+        tenant = TenantProfile.objects.select_related('user').get(id=tenant_id)
+        
+        response = HttpResponse(buffer.read(), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="Statement_{tenant.user.full_name.replace(" ", "_")}.pdf"'
+        return response
+    except Exception as e:
+        logger.error(f"Ledger export failed: {str(e)}")
+        return Response({'error': 'Failed to generate ledger'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

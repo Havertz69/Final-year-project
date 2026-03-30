@@ -18,6 +18,11 @@ export const getApiErrorMessage = (error, fallback = 'An unexpected error occurr
   
   // DRF field errors often look like { "field_name": ["Error message"] }
   try {
+    // If we have a 'details' array, return the first one (often clearer than the general 'error' message)
+    if (Array.isArray(data.details) && data.details.length > 0) {
+      return data.details[0];
+    }
+
     const firstKey = Object.keys(data)[0];
     const val = data[firstKey];
     if (Array.isArray(val)) return `${firstKey}: ${val[0]}`;

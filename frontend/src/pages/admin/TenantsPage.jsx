@@ -102,6 +102,21 @@ export default function TenantsPage() {
     finally { setDeleting(false); }
   };
 
+  const handleExportLedger = async (tenantId, name) => {
+    try {
+      const response = await adminService.exportTenantLedger(tenantId);
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `Statement_${name.replace(/\s+/g, '_')}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+    } catch (e) {
+      setSnack({ open: true, message: getApiErrorMessage(e, 'Failed to export ledger'), severity: 'error' });
+    }
+  };
+
   if (loading) return <LoadingSpinner />;
   if (error) return <ErrorState message={error} onRetry={fetchData} />;
 
@@ -146,6 +161,9 @@ export default function TenantsPage() {
                 <TableCell align="right">
                   <Button size="small" onClick={() => adminService.downloadLeasePDF(t.active_lease_id)} disabled={!t.active_lease_id}>
                     Lease
+                  </Button>
+                  <Button size="small" color="info" onClick={() => handleExportLedger(t.id, t.user_full_name)}>
+                    Ledger
                   </Button>
                   <Button size="small" color="error" onClick={() => { setDeleteId(t.id); setConfirmOpen(true); }}>
                     Unassign

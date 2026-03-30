@@ -13,7 +13,6 @@ import PaymentsPage from '../pages/admin/PaymentsPage';
 import ReportsPage from '../pages/admin/ReportsPage';
 import MaintenancePage from '../pages/admin/MaintenancePage';
 import ChatbotPage from '../pages/admin/ChatbotPage';
-import PaymentEvidencePage from '../pages/admin/PaymentEvidencePage';
 import TenantDashboardPage from '../pages/tenant/TenantDashboardPage';
 import TenantPaymentsPage from '../pages/tenant/TenantPaymentsPage';
 import TenantMaintenancePage from '../pages/tenant/TenantMaintenancePage';
@@ -36,7 +35,6 @@ export default function AppRouter() {
           <Route path="payments" element={<PaymentsPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="maintenance" element={<MaintenancePage />} />
-          <Route path="payment-evidence" element={<PaymentEvidencePage />} />
           <Route path="chatbot" element={<ChatbotPage />} />
           <Route index element={<Navigate to="dashboard" replace />} />
         </Route>

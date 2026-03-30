@@ -1,12 +1,15 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Grid, Paper, Typography, Box, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, Chip, Button, IconButton, Tooltip, Card, CardContent, Skeleton, Avatar, List, ListItem, ListItemText, ListItemAvatar
+  TableHead, TableRow, Chip, Button, IconButton, Tooltip, Card, CardContent, 
+  Skeleton, Avatar, List, ListItem, ListItemText, ListItemAvatar, 
+  Dialog, DialogTitle, DialogContent, DialogActions, TextField, Snackbar, Alert, LinearProgress
 } from '@mui/material';
 import {
   TrendingUp, People, Home, Receipt, ArrowForward, 
   Notifications as NotificationsIcon, CheckCircle, Home as HomeIcon, CheckCircle as CheckCircleIcon, 
-  Cancel as CancelIcon, People as PeopleIcon, AttachMoney as AttachMoneyIcon, Build as BuildIcon
+  Cancel as CancelIcon, People as PeopleIcon, AttachMoney as AttachMoneyIcon, Build as BuildIcon,
+  Campaign as CampaignIcon, CalendarMonth as CalendarIcon
 } from '@mui/icons-material';
 import { Link } from 'react-router-dom';
 import {
@@ -43,6 +46,10 @@ export default function DashboardPage() {
   const [pendingMaintenance, setPendingMaintenance] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [announcement, setAnnouncement] = useState({ open: false, title: '', message: '', sending: false });
+  const [reminding, setReminding] = useState(false);
+  const [snack, setSnack] = useState({ open: false, message: '', severity: 'success' });
+  const [successPopup, setSuccessPopup] = useState({ open: false, title: '', message: '' });
 
   const fetchDashboardData = useCallback(async () => {
     setLoading(true); setError('');
@@ -70,6 +77,34 @@ export default function DashboardPage() {
 
   useEffect(() => { fetchDashboardData(); }, [fetchDashboardData]);
 
+  const handleSendAnnouncement = async () => {
+    if (!announcement.title || !announcement.message) return;
+    setAnnouncement(prev => ({ ...prev, sending: true }));
+    try {
+      await adminService.broadcastAnnouncement({ 
+        title: announcement.title, 
+        message: announcement.message 
+      });
+      setSuccessPopup({ open: true, title: 'Broadcast Sent', message: 'Your announcement has been successfully sent to all tenants.' });
+      setAnnouncement({ open: false, title: '', message: '', sending: false });
+    } catch (e) {
+      setSnack({ open: true, message: getApiErrorMessage(e, 'Failed to send announcement'), severity: 'error' });
+      setAnnouncement(prev => ({ ...prev, sending: false }));
+    }
+  };
+
+  const handleSendReminders = async () => {
+    setReminding(true);
+    try {
+      const res = await adminService.sendRentReminders();
+      setSuccessPopup({ open: true, title: 'Reminders Sent', message: res.data.message });
+    } catch (e) {
+      setSnack({ open: true, message: getApiErrorMessage(e, 'Failed to send reminders'), severity: 'error' });
+    } finally {
+      setReminding(false);
+    }
+  };
+
   if (loading) return <LoadingSpinner />;
   if (error) return <ErrorState message={error} onRetry={fetchDashboardData} />;
   if (!stats) return <EmptyState message="No dashboard data available" />;
@@ -94,7 +129,38 @@ export default function DashboardPage() {
       subtitle="Overview of your property portfolio performance."
       loading={loading}
       onRetry={fetchDashboardData}
+      right={
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <Button 
+            variant="outlined" 
+            startIcon={<NotificationsIcon />}
+            onClick={handleSendReminders}
+            disabled={reminding}
+            sx={{ borderRadius: 2, borderWidth: 2, '&:hover': { borderWidth: 2 } }}
+          >
+            {reminding ? 'Sending...' : 'Send Rent Reminders'}
+          </Button>
+          <Button 
+            variant="contained" 
+            startIcon={<CampaignIcon />}
+            onClick={() => setAnnouncement({ ...announcement, open: true })}
+            sx={{ borderRadius: 2, boxShadow: '0 4px 12px rgba(37, 99, 235, 0.2)' }}
+          >
+            Broadcast Announcement
+          </Button>
+        </Box>
+      }
     >
+      {stats.emergency_maintenance_count > 0 && (
+        <Alert 
+          severity="error" 
+          variant="filled"
+          sx={{ mb: 3, borderRadius: 3, fontWeight: 700, boxShadow: '0 4px 12px rgba(211, 47, 47, 0.2)' }}
+          icon={<BuildIcon />}
+        >
+          {stats.emergency_maintenance_count} high-priority maintenance requests require immediate attention!
+        </Alert>
+      )}
       <Grid container spacing={3} sx={{ mb: 4 }}>
         {KPI_CARDS.map((k) => (
           <Grid item xs={12} sm={6} md={3} key={k.key}>
@@ -258,8 +324,25 @@ export default function DashboardPage() {
                 </Avatar>
                 <Box>
                   <Typography variant="caption" color="text.secondary">Total Revenue This Month</Typography>
-                  <Typography variant="h5" fontWeight={800}>KES {paymentStats?.total_income ?? 0}</Typography>
+                  <Typography variant="h5" fontWeight={800}>KES {paymentStats?.total_income?.toLocaleString() ?? 0}</Typography>
                 </Box>
+              </Box>
+              
+              <Box sx={{ mb: 3 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography variant="body2" fontWeight={700}>Collection Progress</Typography>
+                  <Typography variant="body2" color="primary" fontWeight={700}>
+                    {paymentStats?.collection_rate?.toFixed(1) ?? 0}%
+                  </Typography>
+                </Box>
+                <LinearProgress 
+                  variant="determinate" 
+                  value={paymentStats?.collection_rate ?? 0} 
+                  sx={{ height: 10, borderRadius: 5, bgcolor: '#f1f5f9', '& .MuiLinearProgress-bar': { borderRadius: 5 } }}
+                />
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                  KES {paymentStats?.total_income?.toLocaleString()} of KES {paymentStats?.expected_income?.toLocaleString()} collected
+                </Typography>
               </Box>
               <Grid container spacing={2}>
                 <Grid item xs={4}>
@@ -279,6 +362,154 @@ export default function DashboardPage() {
           </Card>
         </Grid>
       </Grid>
+      <Grid container spacing={3} sx={{ mt: 1 }}>
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 4, boxShadow: '0 4px 20px rgba(0,0,0,0.05)' }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6" fontWeight={800}>Leases Expiring Soon</Typography>
+                <Chip 
+                  label={`${stats?.lease_stats?.expiring_count ?? 0} Expiring`} 
+                  color="warning" 
+                  size="small" 
+                  sx={{ fontWeight: 700 }} 
+                />
+              </Box>
+              {(!stats?.lease_stats?.upcoming_expirations || stats.lease_stats.upcoming_expirations.length === 0) ? (
+                <Typography variant="body2" color="text.secondary">No leases expiring within the next 30 days.</Typography>
+              ) : (
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 700 }}>Tenant</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Unit</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>End Date</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Days Left</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 700 }}>Action</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {stats.lease_stats.upcoming_expirations.map((l) => (
+                        <TableRow key={l.id}>
+                          <TableCell>{l.tenant_name}</TableCell>
+                          <TableCell>{l.unit_number}</TableCell>
+                          <TableCell>{new Date(l.end_date).toLocaleDateString()}</TableCell>
+                          <TableCell>
+                            <Chip 
+                              label={`${l.days_left} days`} 
+                              size="small" 
+                              variant="outlined"
+                              color={l.days_left < 7 ? "error" : "warning"}
+                              sx={{ fontWeight: 600 }}
+                            />
+                          </TableCell>
+                          <TableCell align="right">
+                            <Button size="small" component={Link} to="/admin/tenants" sx={{ fontWeight: 700 }}>Contact</Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
+      {/* Announcement Dialog */}
+      <Dialog 
+        open={announcement.open} 
+        onClose={() => !announcement.sending && setAnnouncement({ ...announcement, open: false })}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{ sx: { borderRadius: 4, p: 1 } }}
+      >
+        <DialogTitle sx={{ fontWeight: 800 }}>Broadcast Announcement</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            This message will be sent as a notification to all active tenants in the system.
+          </Typography>
+          <TextField
+            fullWidth
+            label="Subject / Title"
+            placeholder="e.g., Scheduled Maintenance"
+            variant="outlined"
+            sx={{ mb: 2 }}
+            value={announcement.title}
+            onChange={(e) => setAnnouncement({ ...announcement, title: e.target.value })}
+            disabled={announcement.sending}
+          />
+          <TextField
+            fullWidth
+            label="Message"
+            placeholder="Detailed announcement content..."
+            multiline
+            rows={4}
+            variant="outlined"
+            value={announcement.message}
+            onChange={(e) => setAnnouncement({ ...announcement, message: e.target.value })}
+            disabled={announcement.sending}
+          />
+        </DialogContent>
+        <DialogActions sx={{ p: 3, pt: 0 }}>
+          <Button 
+            onClick={() => setAnnouncement({ ...announcement, open: false })} 
+            disabled={announcement.sending}
+            sx={{ fontWeight: 700 }}
+          >
+            Cancel
+          </Button>
+          <Button 
+            variant="contained" 
+            onClick={handleSendAnnouncement}
+            disabled={announcement.sending || !announcement.title || !announcement.message}
+            sx={{ borderRadius: 2, px: 3, fontWeight: 700 }}
+          >
+            {announcement.sending ? 'Sending...' : 'Send Broadcast'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Snackbar 
+        open={snack.open} 
+        autoHideDuration={4000} 
+        onClose={() => setSnack({ ...snack, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert severity={snack.severity} sx={{ borderRadius: 3, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+          {snack.message}
+        </Alert>
+      </Snackbar>
+
+      {/* Success Popup Dialog */}
+      <Dialog 
+        open={successPopup.open} 
+        onClose={() => setSuccessPopup({ ...successPopup, open: false })}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{ sx: { borderRadius: 3, p: 2, textAlign: 'center' } }}
+      >
+        <DialogTitle sx={{ fontWeight: 800, color: 'success.main', pb: 1 }}>
+          {successPopup.title}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body1">
+            {successPopup.message}
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'center', pt: 2 }}>
+          <Button 
+            variant="contained" 
+            color="success"
+            onClick={() => setSuccessPopup({ ...successPopup, open: false })}
+            sx={{ borderRadius: 2, px: 4, fontWeight: 700 }}
+          >
+            Okay
+          </Button>
+        </DialogActions>
+      </Dialog>
     </AdminPageShell>
   );
 }
